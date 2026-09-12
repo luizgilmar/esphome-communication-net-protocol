@@ -1,0 +1,43 @@
+# Compile-only foundation bench. Do not upload this firmware to a device:
+# no command routing is implemented yet.
+esphome:
+  name: communication-net-foundation
+  friendly_name: Communication NetProtocol Foundation
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+wifi:
+  ap:
+    ssid: "Communication Foundation Bench"
+
+mqtt:
+  id: device_mqtt
+  broker: !secret mqtt_broker
+  reboot_timeout: 0s
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [communication_net_protocol]
+
+communication_net_protocol:
+  id: command_network
+  device_id: communication-foundation
+  mqtt:
+    mqtt_id: device_mqtt
+    command_prefix: tx/commands
+    result_prefix: tx/results
+    session_prefix: tx/sessions
+  policies:
+    - id: mqtt_only
+      transports: [mqtt]
+  destinations:
+    - id: quartogian
+      policy: mqtt_only
+      mqtt_target: quartogian

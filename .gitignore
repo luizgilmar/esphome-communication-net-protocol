@@ -4,3 +4,4 @@ __pycache__/
 .esphome/
 build/
 .venv/
+secrets.yaml
