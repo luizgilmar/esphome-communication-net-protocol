@@ -92,3 +92,17 @@ change behavior. The original TX/HUB firmware and YAML remain unmodified.
 
 The generic component must not claim that full-mesh routing is implemented:
 current peers are direct neighbors, without relaying through HUBs.
+
+## MQTT wire boundary (next incremental step)
+
+`MqttWireTransport` uses the existing ESPHome MQTT client for a single
+bounded subscription mailbox and byte publication. The mailbox neither parses
+JSON nor interprets `IN_PROGRESS`/terminal status. Application correlation,
+deduplication, retries and fallback remain unimplemented and must be added to
+the shared protocol core. This transport does not subscribe or publish from
+the foundation bench; using `communication_net_protocol:` there cannot alter
+the deployed Quartogian command route.
+
+Host validation: compile `tests/mqtt_mailbox_test.cpp` with a C++17 compiler
+and run the resulting executable. Firmware validation remains a separate
+`esphome config` and `esphome compile` of the foundation bench. No OTA upload.

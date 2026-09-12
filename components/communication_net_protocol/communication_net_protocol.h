@@ -2,6 +2,10 @@
 
 #include "esphome/core/component.h"
 
+#ifdef USE_MQTT
+#include "mqtt_wire_transport.h"
+#endif
+
 namespace esphome {
 namespace communication_net_protocol {
 
@@ -12,8 +16,15 @@ class CommunicationNetProtocolComponent : public Component {
   void setup() override {}
   void dump_config() override;
 
+#ifdef USE_MQTT
+  MqttWireTransport &mqtt_wire() { return mqtt_wire_; }
+#endif
+
  protected:
   const char *device_id_{nullptr};
+#ifdef USE_MQTT
+  MqttWireTransport mqtt_wire_{};
+#endif
 };
 
 }  // namespace communication_net_protocol
