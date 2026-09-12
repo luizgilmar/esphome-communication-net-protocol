@@ -31,6 +31,7 @@ communication_net_protocol:
   device_id: communication-foundation
   mqtt:
     mqtt_id: device_mqtt
+    listen_commands: true  # Isolated receive-only probe; does not execute actions.
     command_prefix: tx/commands
     result_prefix: tx/results
     session_prefix: tx/sessions

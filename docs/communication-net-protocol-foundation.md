@@ -1,7 +1,8 @@
 # Communication NetProtocol — contract foundation
 
-This is the **declarative foundation only**. Compiling this component must not
-subscribe to MQTT, send ESP-NOW frames, take ownership of an inbound binding,
+This is the **declarative foundation only**. Without the explicit receive-only
+probe, using this component must not subscribe to MQTT, send ESP-NOW frames,
+take ownership of an inbound binding,
 or change a deployed device's command route. The pilot resource migration is
 a separate, explicitly gated step.
 
@@ -93,14 +94,35 @@ change behavior. The original TX/HUB firmware and YAML remain unmodified.
 The generic component must not claim that full-mesh routing is implemented:
 current peers are direct neighbors, without relaying through HUBs.
 
+## Opt-in MQTT command observation (isolated bench)
+
+`mqtt.listen_commands: true` subscribes to the full topic composed as
+`<command_prefix>/<device_id>/command`; the default is `false`. The isolated
+foundation bench opts in for compilation. The callback only fills a bounded
+mailbox; the component consumes at most one message per cooperative loop and
+records its size/count without parsing its content or executing an action.
+The listener's additional buffers are compiled only when explicitly enabled,
+and live on the component, not the loopTask stack. No deployed TX/HUB
+configuration is changed. An incoming MQTT `source.device_id` and `boot_id`
+must **not** be treated as authenticated identity simply because the JSON
+contains those fields: the trust policy for broker publishers is still open.
+This probe is not proof of end-to-end execution, result correlation or
+safe cross-transport fallback.
+
+The MQTT wire methods are inline in their header because the isolated ESPHome
+build may compile the component consumer without linking the separate wire
+translation unit. A host link test checks both the consumer alone and the
+consumer with the optional `.cpp` file. The firmware compile still verifies
+the actual ESPHome MQTT API and linker behavior.
+
 ## MQTT wire boundary (next incremental step)
 
 `MqttWireTransport` uses the existing ESPHome MQTT client for a single
 bounded subscription mailbox and byte publication. The mailbox neither parses
 JSON nor interprets `IN_PROGRESS`/terminal status. Application correlation,
 deduplication, retries and fallback remain unimplemented and must be added to
-the shared protocol core. This transport does not subscribe or publish from
-the foundation bench; using `communication_net_protocol:` there cannot alter
+the shared protocol core. The foundation bench now explicitly opts into a
+receive-only subscription; using `communication_net_protocol:` there cannot alter
 the deployed Quartogian command route.
 
 Host validation: compile `tests/mqtt_mailbox_test.cpp` with a C++17 compiler

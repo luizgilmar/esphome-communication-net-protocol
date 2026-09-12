@@ -24,6 +24,7 @@ CONF_DESTINATIONS = "destinations"
 CONF_POLICY = "policy"
 CONF_ESPNOW_PEER = "espnow_peer"
 CONF_MQTT_TARGET = "mqtt_target"
+CONF_LISTEN_COMMANDS = "listen_commands"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -70,6 +71,7 @@ def _mqtt_id(value):
 
 MQTT_SCHEMA = cv.Schema({
     cv.Required(CONF_MQTT_ID): _mqtt_id,
+    cv.Optional(CONF_LISTEN_COMMANDS, default=False): cv.boolean,
     cv.Optional(CONF_COMMAND_PREFIX, default="tx/commands"): _prefix,
     cv.Optional(CONF_RESULT_PREFIX, default="tx/results"): _prefix,
     cv.Optional(CONF_SESSION_PREFIX, default="tx/sessions"): _prefix,
@@ -146,3 +148,12 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
+    mqtt_config = config.get(CONF_MQTT)
+    if mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS]:
+        cg.add_define("USE_COMMUNICATION_NET_MQTT_LISTENER")
+        command_topic = (
+            f"{mqtt_config[CONF_COMMAND_PREFIX]}/{config[CONF_DEVICE_ID]}/command"
+        )
+        if len(command_topic.encode("utf-8")) > 192:
+            raise cv.Invalid("composed MQTT command topic exceeds 192 bytes")
+        cg.add(var.set_mqtt_command_topic(command_topic))
