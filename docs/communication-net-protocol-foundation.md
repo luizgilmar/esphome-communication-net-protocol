@@ -106,3 +106,63 @@ the deployed Quartogian command route.
 Host validation: compile `tests/mqtt_mailbox_test.cpp` with a C++17 compiler
 and run the resulting executable. Firmware validation remains a separate
 `esphome config` and `esphome compile` of the foundation bench. No OTA upload.
+
+## Correlation tracker (not yet bound to either transport)
+
+The independent `TransactionTracker<4>` keeps an application transaction ID
+and source boot ID in a fixed-capacity table. It can retain one coalesced
+`IN_PROGRESS` event and the terminal outcome at the same time, rejecting
+duplicate terminals and replies from a stale session. Its deadline applies to
+the complete application operation: a failed MQTT or ESP-NOW *attempt* is not
+itself a terminal application failure if the policy has another viable route.
+This header has no MQTT/ESP-NOW includes and no dynamic allocation. Parsing
+the actual MQTT JSON/result envelope, integrating the ESP-NOW observer, and
+cross-transport receiver deduplication are **future gates**: do not connect a
+HUB action yet. The tracker is testable on a host with
+`tests/transaction_tracker_test.cpp`.
+
+## Inbound replay guard (not yet bound to command dispatch)
+
+`InboundReplayGuard` reserves a bounded entry by sender ID, sender boot ID and
+transaction ID **before** executing an inbound action. A second arrival over
+either transport is reported as pending/terminal duplicate; a reused identity
+with different canonical command bytes is rejected as a conflict, without a
+collision-prone fingerprint. The parser must produce the **same bounded byte
+representation** from MQTT and ESP-NOW for the same device, resource, action
+and arguments; comparing raw JSON with an ESP-NOW frame is not sufficient.
+Entries are not
+evicted on transport reconnect, timeout or table pressure: a full table rejects
+new commands rather than risking a second `toggle`. Only a confirmed new sender
+session may clear **terminal** entries from the old boot ID; pending entries
+remain reserved. This is an in-memory building
+block, **not yet active in firmware dispatch** and **not durable over receiver
+reboot**. The bounded `encode_canonical_command` now encodes device, resource,
+action and normalized arguments independently of transport. Both adapters
+must still produce equivalent semantic fields; raw MQTT JSON and radio frame
+bytes are not interchangeable. Authenticated sender identity, session fencing
+and replaying a stored terminal result are required before enabling automatic
+fallback of non-idempotent commands. Host tests:
+`tests/inbound_replay_guard_test.cpp` and `tests/canonical_command_test.cpp`.
+
+## Transport-neutral inbound admission (still no live routing)
+
+`InboundCommandGate` combines the canonical encoder and replay guard behind
+one `InboundCommandView` with source ID, source boot ID, transaction ID and
+application intent. MQTT can supply the boot ID from its `source` envelope;
+ESP-NOW can supply it from the authenticated frame envelope. The adapters
+must verify sender identity *before* calling the gate, and call it in the
+cooperative loop rather than a network callback. Only `NEW_COMMAND` allows
+the device adapter to execute; a duplicate never invokes the executor again.
+The gate includes neither transport nor device headers and has no hard-coded
+device/resource IDs. **This is not wired into either transport yet.** Before
+automatic fallback, fence stale sessions and define behavior after a receiver
+reboot. Host validation:
+`tests/inbound_command_gate_test.cpp`.
+
+The gate stores a bounded, transport-neutral terminal outcome (status and up
+to 256 application bytes). An adapter can serialize it again for either
+transport without re-executing the action. Only a verified *application*
+outcome may call `complete`; an ACK or publish success cannot. Duplicate
+pending commands remain pending, and a conflicting command identity cannot
+retrieve another command's result. This is volatile and does not make
+fallback safe across receiver reboot or stale sender session.

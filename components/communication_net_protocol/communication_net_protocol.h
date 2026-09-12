@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "transaction_tracker.h"
 
 #ifdef USE_MQTT
 #include "mqtt_wire_transport.h"
@@ -16,12 +17,15 @@ class CommunicationNetProtocolComponent : public Component {
   void setup() override {}
   void dump_config() override;
 
+  TransactionTracker<4> &transactions() { return this->transactions_; }
+
 #ifdef USE_MQTT
   MqttWireTransport &mqtt_wire() { return mqtt_wire_; }
 #endif
 
  protected:
   const char *device_id_{nullptr};
+  TransactionTracker<4> transactions_{};
 #ifdef USE_MQTT
   MqttWireTransport mqtt_wire_{};
 #endif
