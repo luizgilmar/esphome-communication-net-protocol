@@ -117,6 +117,20 @@ the actual ESPHome MQTT API and linker behavior.
 
 ## MQTT wire boundary (next incremental step)
 
+### Receive-only canonical probe
+
+After consuming one mailbox entry, the component now accepts only a small
+three-string JSON object: `{"device":"quartogian_probe","resource":"light/spot_chuveiro","action":"toggle"}`.
+Fields may be reordered. Unknown or duplicate fields, escaped strings,
+arguments, malformed JSON and a device other than the configured `device_id`
+are rejected. Successful decoding generates the bounded canonical command
+bytes and logs a counter, **without invoking the replay gate or any executor**.
+`{"probe":true}` remains an observed but rejected diagnostic payload. This
+deliberately narrow wire format is not the existing production MQTT envelope;
+no production topic should be routed to this probe. Do not infer sender
+authentication from these bytes. Define trusted publisher identity, full
+production envelope and normalized arguments before migration or fallback.
+
 `MqttWireTransport` uses the existing ESPHome MQTT client for a single
 bounded subscription mailbox and byte publication. The mailbox neither parses
 JSON nor interprets `IN_PROGRESS`/terminal status. Application correlation,

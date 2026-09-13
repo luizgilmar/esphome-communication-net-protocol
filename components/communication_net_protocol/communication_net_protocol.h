@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "transaction_tracker.h"
+#include "mqtt_command_decoder.h"
 
 #ifdef USE_MQTT
 #include "mqtt_wire_transport.h"
@@ -29,6 +30,8 @@ class CommunicationNetProtocolComponent : public Component {
     this->mqtt_command_topic_ = topic;
   }
   uint32_t observed_commands() const { return this->observed_commands_; }
+  uint32_t valid_commands() const { return this->valid_commands_; }
+  uint32_t rejected_commands() const { return this->rejected_commands_; }
 #endif
 
  protected:
@@ -41,6 +44,9 @@ class CommunicationNetProtocolComponent : public Component {
   const char *mqtt_command_topic_{nullptr};
   bool mqtt_subscription_registered_{false};
   uint32_t observed_commands_{0};
+  uint32_t valid_commands_{0};
+  uint32_t rejected_commands_{0};
+  uint8_t canonical_command_[192]{};
   // Keep the bounded receive copy off the constrained loopTask stack.
   char received_topic_[MqttMailbox::MAX_TOPIC + 1]{};
   uint8_t received_payload_[MqttMailbox::MAX_PAYLOAD]{};

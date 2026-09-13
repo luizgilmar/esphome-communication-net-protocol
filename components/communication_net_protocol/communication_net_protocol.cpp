@@ -26,6 +26,19 @@ void CommunicationNetProtocolComponent::loop() {
     ESP_LOGD(TAG, "MQTT command observed bytes=%u count=%u (not executed)",
              static_cast<unsigned>(payload_length),
              static_cast<unsigned>(this->observed_commands_));
+    size_t canonical_length = 0;
+    if (decode_mqtt_command_probe(this->received_payload_, payload_length,
+                                  this->device_id_, this->canonical_command_,
+                                  sizeof(this->canonical_command_), canonical_length)) {
+      ++this->valid_commands_;
+      ESP_LOGI(TAG, "MQTT canonical command validated bytes=%u count=%u (not executed)",
+               static_cast<unsigned>(canonical_length),
+               static_cast<unsigned>(this->valid_commands_));
+    } else {
+      ++this->rejected_commands_;
+      ESP_LOGD(TAG, "MQTT probe payload rejected count=%u (not executed)",
+               static_cast<unsigned>(this->rejected_commands_));
+    }
   }
 #endif
 }
