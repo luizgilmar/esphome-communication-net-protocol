@@ -13,4 +13,6 @@ def test_tracker_separates_transport_attempt_from_application_deadline():
     assert "source_boot_id" in source
     assert "now_ms - slot.started_ms < slot.timeout_ms" in source
     assert "TransactionStage::EXPIRED" in source
+    assert "TransactionStage::INTERRUPTED" in source
+    assert "confirm_interruption" in source
     assert "std::vector" not in source

@@ -13,6 +13,7 @@ enum class TransactionStage : uint8_t {
   REJECTED,
   FAILED,
   EXPIRED,
+  INTERRUPTED,
 };
 
 enum class TransactionObserveStatus : uint8_t {
@@ -70,6 +71,22 @@ template<size_t Capacity> class TransactionTracker {
       slot->terminal_pending = true;
     }
     return TransactionObserveStatus::ACCEPTED;
+  }
+
+  // Call only after the executor has confirmed a separate stop command.
+  // Do not manufacture a successful endpoint result for the original motion.
+  // The caller must verify that stop and motion refer to the same resource;
+  // this transport-independent tracker has no knowledge of resource IDs.
+  TransactionObserveStatus confirm_interruption(uint64_t transaction_id,
+                                                uint64_t source_boot_id,
+                                                uint32_t now_ms) {
+    const TransactionObserveStatus status = this->observe(
+        transaction_id, source_boot_id, TransactionStage::INTERRUPTED, now_ms);
+    if (status == TransactionObserveStatus::ACCEPTED) {
+      // A stale progress indication must not precede the interruption.
+      this->find_(transaction_id)->progress_pending = false;
+    }
+    return status;
   }
 
   // Deadline of the *overall application transaction*, not of an individual

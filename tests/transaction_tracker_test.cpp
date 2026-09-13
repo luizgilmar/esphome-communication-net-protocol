@@ -42,5 +42,25 @@ int main() {
   tracker.expire(0x00000020u);
   assert(tracker.take_event(event) && event.stage == TransactionStage::EXPIRED);
   assert(!tracker.contains(8));
+
+  // A confirmed stop closes the original motion, not the stop transaction.
+  assert(tracker.begin(11, 9, 1000, 23000));
+  assert(tracker.observe(11, 9, TransactionStage::IN_PROGRESS, 1010) ==
+         TransactionObserveStatus::ACCEPTED);
+  assert(tracker.confirm_interruption(11, 10, 1020) ==
+         TransactionObserveStatus::STALE_SESSION);
+  assert(tracker.confirm_interruption(11, 9, 1030) ==
+         TransactionObserveStatus::ACCEPTED);
+  assert(tracker.observe(11, 9, TransactionStage::SUCCEEDED, 1040) ==
+         TransactionObserveStatus::ALREADY_TERMINAL);
+  assert(tracker.take_event(event) && event.stage == TransactionStage::INTERRUPTED &&
+         event.elapsed_ms == 30);
+  assert(!tracker.take_event(event) && !tracker.contains(11));
+  assert(tracker.begin(12, 9, 1050, 23000));
+  assert(tracker.observe(12, 9, TransactionStage::SUCCEEDED, 1060) ==
+         TransactionObserveStatus::ACCEPTED);
+  assert(tracker.confirm_interruption(12, 9, 1070) ==
+         TransactionObserveStatus::ALREADY_TERMINAL);
+  assert(tracker.take_event(event) && event.stage == TransactionStage::SUCCEEDED);
   return 0;
 }
