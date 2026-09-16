@@ -156,10 +156,24 @@ duplicate terminals and replies from a stale session. Its deadline applies to
 the complete application operation: a failed MQTT or ESP-NOW *attempt* is not
 itself a terminal application failure if the policy has another viable route.
 This header has no MQTT/ESP-NOW includes and no dynamic allocation. Parsing
-Binding decoded MQTT/result envelopes to the tracker, integrating the ESP-NOW observer, and
+Wiring MQTT results to the tracker at runtime, integrating the ESP-NOW observer, and
 cross-transport receiver deduplication are **future gates**: do not connect a
 HUB action yet. The tracker is testable on a host with
 `tests/transaction_tracker_test.cpp`.
+
+### Result correlation helper (not subscribed at runtime)
+
+`mqtt_result_decoder.h` recognizes the existing HUB result envelope, including
+`in_progress`, terminal success/rejection/failure and `failed` with error code
+`interrupted`. It extracts the decimal `transaction_id` and maps the result to
+an application stage. The helper accepts the source boot ID from the local
+outstanding request, never from result JSON; `TransactionTracker` rejects an
+unknown transaction or a mismatch. It cannot prove publisher identity or the
+effect of an action. The caller must verify the MQTT reply topic and broker
+trust policy before invoking it. No result topic is subscribed here and no
+existing TX/HUB runtime is changed. Host test:
+`tests/mqtt_result_decoder_test.cpp`. Application result subscription,
+publisher/session validation and dispatch remain separate migration gates.
 
 ## Inbound replay guard (not yet bound to command dispatch)
 

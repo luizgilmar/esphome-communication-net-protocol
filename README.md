@@ -27,3 +27,5 @@ this ZIP; create the repository only after validation.
 The opt-in receive-only MQTT observer can now validate the existing application
 command envelope as well as the small diagnostic probe. It does not dispatch
 commands, authenticate publishers, or modify the current HUB MQTT package.
+The bounded MQTT result decoder and tracker correlation helper are available
+for host validation; runtime subscription to result topics is not enabled.
