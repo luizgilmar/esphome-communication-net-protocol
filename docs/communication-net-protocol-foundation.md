@@ -100,7 +100,7 @@ current peers are direct neighbors, without relaying through HUBs.
 `<command_prefix>/<device_id>/command`; the default is `false`. The isolated
 foundation bench opts in for compilation. The callback only fills a bounded
 mailbox; the component consumes at most one message per cooperative loop and
-records its size/count without parsing its content or executing an action.
+validates its format without executing an action.
 The listener's additional buffers are compiled only when explicitly enabled,
 and live on the component, not the loopTask stack. No deployed TX/HUB
 configuration is changed. An incoming MQTT `source.device_id` and `boot_id`
@@ -119,17 +119,20 @@ the actual ESPHome MQTT API and linker behavior.
 
 ### Receive-only canonical probe
 
-After consuming one mailbox entry, the component now accepts only a small
-three-string JSON object: `{"device":"quartogian_probe","resource":"light/spot_chuveiro","action":"toggle"}`.
-Fields may be reordered. Unknown or duplicate fields, escaped strings,
-arguments, malformed JSON and a device other than the configured `device_id`
-are rejected. Successful decoding generates the bounded canonical command
-bytes and logs a counter, **without invoking the replay gate or any executor**.
-`{"probe":true}` remains an observed but rejected diagnostic payload. This
-deliberately narrow wire format is not the existing production MQTT envelope;
-no production topic should be routed to this probe. Do not infer sender
-authentication from these bytes. Define trusted publisher identity, full
-production envelope and normalized arguments before migration or fallback.
+After consuming one mailbox entry, the component accepts either the isolated
+three-string diagnostic JSON or the current application MQTT envelope with
+`transaction_id`, `reply_to`, `source` (`device_id`, `boot_id`), `target`
+(`device_id`, `resource`) and `command` (`name`). Field order is arbitrary;
+all fields must be present and bounded. Unknown/duplicate fields, escaped
+strings, command arguments, malformed JSON, invalid numeric identifiers and
+the wrong target device are rejected. Successful decoding produces the same
+bounded canonical bytes for both forms and logs a counter, **without invoking
+the replay gate or any executor**. The original `{"probe":true}` diagnostic
+payload remains rejected. The live envelope can therefore be observed before
+any application route changes; this is not yet an executable MQTT endpoint.
+Do not infer sender authentication from `source` bytes supplied by MQTT.
+Define broker publisher trust, argument normalization and transaction/session
+handling before migrating a resource or enabling fallback.
 
 `MqttWireTransport` uses the existing ESPHome MQTT client for a single
 bounded subscription mailbox and byte publication. The mailbox neither parses
@@ -139,7 +142,8 @@ the shared protocol core. The foundation bench now explicitly opts into a
 receive-only subscription; using `communication_net_protocol:` there cannot alter
 the deployed Quartogian command route.
 
-Host validation: compile `tests/mqtt_mailbox_test.cpp` with a C++17 compiler
+Host validation: compile `tests/mqtt_mailbox_test.cpp` and
+`tests/mqtt_envelope_decoder_test.cpp` with a C++17 compiler
 and run the resulting executable. Firmware validation remains a separate
 `esphome config` and `esphome compile` of the foundation bench. No OTA upload.
 
@@ -152,7 +156,7 @@ duplicate terminals and replies from a stale session. Its deadline applies to
 the complete application operation: a failed MQTT or ESP-NOW *attempt* is not
 itself a terminal application failure if the policy has another viable route.
 This header has no MQTT/ESP-NOW includes and no dynamic allocation. Parsing
-the actual MQTT JSON/result envelope, integrating the ESP-NOW observer, and
+Binding decoded MQTT/result envelopes to the tracker, integrating the ESP-NOW observer, and
 cross-transport receiver deduplication are **future gates**: do not connect a
 HUB action yet. The tracker is testable on a host with
 `tests/transaction_tracker_test.cpp`.

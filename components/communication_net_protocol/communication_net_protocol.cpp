@@ -1,6 +1,7 @@
 #include "communication_net_protocol.h"
 
 #include "esphome/core/log.h"
+#include "mqtt_envelope_decoder.h"
 
 namespace esphome {
 namespace communication_net_protocol {
@@ -27,7 +28,10 @@ void CommunicationNetProtocolComponent::loop() {
              static_cast<unsigned>(payload_length),
              static_cast<unsigned>(this->observed_commands_));
     size_t canonical_length = 0;
-    if (decode_mqtt_command_probe(this->received_payload_, payload_length,
+    if (decode_mqtt_command_envelope(this->received_payload_, payload_length,
+                                     this->device_id_, this->canonical_command_,
+                                     sizeof(this->canonical_command_), canonical_length) ||
+        decode_mqtt_command_probe(this->received_payload_, payload_length,
                                   this->device_id_, this->canonical_command_,
                                   sizeof(this->canonical_command_), canonical_length)) {
       ++this->valid_commands_;

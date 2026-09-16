@@ -1,9 +1,11 @@
 # ESPHome Communication NetProtocol
 
 Independent ESPHome external component for application-level transactions
-across transport adapters. The initial package is **a declarative foundation
-only**: it validates policies, destinations and MQTT topic prefixes but does
-not subscribe, send, execute commands or provide fallback yet.
+across transport adapters. The current package is **a declarative foundation
+with an optional receive-only MQTT observer**: it validates policies,
+destinations and MQTT topic prefixes. A subscription occurs only with
+`mqtt.listen_commands: true`; it does not send or execute commands or provide
+fallback yet.
 
 ## Repository boundaries
 
@@ -21,3 +23,7 @@ runtime binding and first resource migration have passed hardware testing.
 Run tests from the repository root with `python -m pytest -q` in an environment
 with ESPHome and pytest installed. No git history or remote is included in
 this ZIP; create the repository only after validation.
+
+The opt-in receive-only MQTT observer can now validate the existing application
+command envelope as well as the small diagnostic probe. It does not dispatch
+commands, authenticate publishers, or modify the current HUB MQTT package.
