@@ -321,3 +321,11 @@ the primary light before the automation starts; grouped commands using
 `toggled` should ensure all lights start in a consistent state. `on` and `off`
 apply the same expected value to every light. The route and action remain YAML
 declarations; the state check runs in C++ and is shared by MQTT and ESP-NOW.
+
+For a grouped `toggled` binding, `completion.toggle_reference_light_ids`
+optionally names additional lights whose initial ON state contributes to the
+pre-action state. The expected final state is OFF if the primary light or any
+reference was ON, and ON otherwise. This is useful when an existing toggle
+means "turn the whole group off if any primary member is on." Auxiliary
+lights such as a power supply can be placed in `additional_light_ids` without
+changing the toggle decision. Both lists are bounded to three extra lights.

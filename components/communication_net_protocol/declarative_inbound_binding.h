@@ -26,6 +26,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   void add_completion_light(light::LightState *state) {
     if (state != nullptr && light_count_ < 4) lights_[light_count_++] = state;
   }
+  void add_toggle_reference_light(light::LightState *state) {
+    if (state != nullptr && toggle_reference_count_ < 3)
+      toggle_references_[toggle_reference_count_++] = state;
+  }
   void set_expected(LightExpectedState expected) { expected_ = expected; }
   void set_completion_timeout(uint32_t timeout_ms) { timeout_ms_ = timeout_ms; }
 
@@ -34,6 +38,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   light::LightState *light_at(size_t index) const {
     return index < light_count_ ? lights_[index] : nullptr;
   }
+  size_t toggle_reference_count() const { return toggle_reference_count_; }
+  light::LightState *toggle_reference_at(size_t index) const {
+    return index < toggle_reference_count_ ? toggle_references_[index] : nullptr;
+  }
   LightExpectedState expected() const { return expected_; }
   uint32_t completion_timeout() const { return timeout_ms_; }
 
@@ -41,6 +49,8 @@ class DeclarativeInboundBinding : public Trigger<> {
   const char *route_id_{nullptr};
   light::LightState *lights_[4]{};
   size_t light_count_{0};
+  light::LightState *toggle_references_[3]{};
+  size_t toggle_reference_count_{0};
   LightExpectedState expected_{LightExpectedState::TOGGLED};
   uint32_t timeout_ms_{2000};
 };

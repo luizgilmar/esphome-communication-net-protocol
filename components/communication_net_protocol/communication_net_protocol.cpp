@@ -127,7 +127,9 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
            route, radio ? "esp_now" : "mqtt",
            static_cast<unsigned long long>(command.transaction_id));
   if (binding->light() != nullptr) {
-    const bool on = binding->light()->current_values.is_on();
+    bool on = binding->light()->current_values.is_on();
+    for (size_t i = 0; i < binding->toggle_reference_count(); ++i)
+      on |= binding->toggle_reference_at(i)->current_values.is_on();
     this->inbound_expected_on_ =
         binding->expected() == LightExpectedState::ON ||
         (binding->expected() == LightExpectedState::TOGGLED && !on);
