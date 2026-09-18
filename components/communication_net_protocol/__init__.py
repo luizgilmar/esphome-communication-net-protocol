@@ -131,12 +131,13 @@ DESTINATION_SCHEMA = cv.Schema({
 def _validate_light_completion(config):
     if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
-    if CONF_RGB in config and config[CONF_EXPECTED] != LightExpectedState.ON:
+    # Run before cv.enum converts the YAML string to a C++ enum expression.
+    if CONF_RGB in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("RGB completion requires expected: on")
     return config
 
 
-LIGHT_COMPLETION_SCHEMA = cv.All(cv.Schema({
+LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     cv.Required(CONF_LIGHT_ID): cv.use_id(light.LightState),
     cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
@@ -157,7 +158,7 @@ LIGHT_COMPLETION_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_RGB_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
-}), _validate_light_completion)
+}))
 
 INBOUND_BINDING_SCHEMA = automation.validate_automation({
     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(DeclarativeInboundBinding),
