@@ -329,3 +329,11 @@ reference was ON, and ON otherwise. This is useful when an existing toggle
 means "turn the whole group off if any primary member is on." Auxiliary
 lights such as a power supply can be placed in `additional_light_ids` without
 changing the toggle decision. Both lists are bounded to three extra lights.
+
+For RGB commands, set `expected: on`, `completion.rgb` with integer `red`,
+`green` and `blue` values from 0 to 255, and `completion.rgb_light_ids` with
+the local RGB lights to verify. Both RGB fields must be present together. The
+executor also checks the primary and additional lights are ON; supply lights
+can therefore be checked without requiring their color to match. Each RGB
+channel allows one byte of rounding difference. The route succeeds only after
+the declared RGB values appear on every RGB light, or fails on timeout.

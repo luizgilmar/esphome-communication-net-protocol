@@ -31,6 +31,16 @@ class DeclarativeInboundBinding : public Trigger<> {
       toggle_references_[toggle_reference_count_++] = state;
   }
   void set_expected(LightExpectedState expected) { expected_ = expected; }
+  void set_expected_rgb(uint8_t red, uint8_t green, uint8_t blue) {
+    expected_rgb_[0] = red;
+    expected_rgb_[1] = green;
+    expected_rgb_[2] = blue;
+    check_rgb_ = true;
+  }
+  void add_rgb_light(light::LightState *state) {
+    if (state != nullptr && rgb_light_count_ < 3)
+      rgb_lights_[rgb_light_count_++] = state;
+  }
   void set_completion_timeout(uint32_t timeout_ms) { timeout_ms_ = timeout_ms; }
 
   light::LightState *light() const { return lights_[0]; }
@@ -43,6 +53,12 @@ class DeclarativeInboundBinding : public Trigger<> {
     return index < toggle_reference_count_ ? toggle_references_[index] : nullptr;
   }
   LightExpectedState expected() const { return expected_; }
+  bool check_rgb() const { return check_rgb_; }
+  uint8_t expected_rgb(size_t channel) const { return expected_rgb_[channel]; }
+  size_t rgb_light_count() const { return rgb_light_count_; }
+  light::LightState *rgb_light_at(size_t index) const {
+    return index < rgb_light_count_ ? rgb_lights_[index] : nullptr;
+  }
   uint32_t completion_timeout() const { return timeout_ms_; }
 
  private:
@@ -52,6 +68,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   light::LightState *toggle_references_[3]{};
   size_t toggle_reference_count_{0};
   LightExpectedState expected_{LightExpectedState::TOGGLED};
+  uint8_t expected_rgb_[3]{};
+  bool check_rgb_{false};
+  light::LightState *rgb_lights_[3]{};
+  size_t rgb_light_count_{0};
   uint32_t timeout_ms_{2000};
 };
 

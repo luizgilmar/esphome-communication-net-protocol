@@ -163,6 +163,18 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
   for (size_t i = 0; i < this->active_binding_->light_count(); ++i)
     completed &= this->active_binding_->light_at(i)->current_values.is_on() ==
                  this->inbound_expected_on_;
+  if (completed && this->active_binding_->check_rgb()) {
+    for (size_t i = 0; i < this->active_binding_->rgb_light_count(); ++i) {
+      const auto &values = this->active_binding_->rgb_light_at(i)->current_values;
+      const float observed[3]{values.get_red(), values.get_green(), values.get_blue()};
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const int actual = static_cast<int>(observed[channel] * 255.0f + 0.5f);
+        const int expected = this->active_binding_->expected_rgb(channel);
+        // One unit accounts for float-to-byte rounding in light color values.
+        completed &= actual >= expected - 1 && actual <= expected + 1;
+      }
+    }
+  }
   const bool timed_out = now_ms - this->inbound_started_ms_ >=
                          this->inbound_timeout_ms_;
   if (!completed && !timed_out) return;

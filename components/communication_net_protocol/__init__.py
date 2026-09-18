@@ -38,6 +38,8 @@ CONF_COMPLETION = "completion"
 CONF_EXPECTED = "expected"
 CONF_ADDITIONAL_LIGHT_IDS = "additional_light_ids"
 CONF_TOGGLE_REFERENCE_LIGHT_IDS = "toggle_reference_light_ids"
+CONF_RGB_LIGHT_IDS = "rgb_light_ids"
+CONF_RGB = "rgb"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -126,7 +128,15 @@ DESTINATION_SCHEMA = cv.Schema({
     cv.Optional(CONF_ESPNOW_PEER): _identifier(63, "espnow_peer"),
 })
 
-LIGHT_COMPLETION_SCHEMA = cv.Schema({
+def _validate_light_completion(config):
+    if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
+        raise cv.Invalid("rgb and rgb_light_ids must be configured together")
+    if CONF_RGB in config and config[CONF_EXPECTED] != LightExpectedState.ON:
+        raise cv.Invalid("RGB completion requires expected: on")
+    return config
+
+
+LIGHT_COMPLETION_SCHEMA = cv.All(cv.Schema({
     cv.Required(CONF_LIGHT_ID): cv.use_id(light.LightState),
     cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
@@ -139,7 +149,15 @@ LIGHT_COMPLETION_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_TIMEOUT, default="2s"):
         cv.positive_time_period_milliseconds,
-})
+    cv.Optional(CONF_RGB): cv.Schema({
+        cv.Required("red"): cv.int_range(min=0, max=255),
+        cv.Required("green"): cv.int_range(min=0, max=255),
+        cv.Required("blue"): cv.int_range(min=0, max=255),
+    }),
+    cv.Optional(CONF_RGB_LIGHT_IDS): cv.All(
+        cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
+    ),
+}), _validate_light_completion)
 
 INBOUND_BINDING_SCHEMA = automation.validate_automation({
     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(DeclarativeInboundBinding),
@@ -259,6 +277,11 @@ async def to_code(config):
                 cg.add(trigger.add_toggle_reference_light(
                     await cg.get_variable(reference_id)))
             cg.add(trigger.set_expected(completion[CONF_EXPECTED]))
+            if CONF_RGB in completion:
+                rgb = completion[CONF_RGB]
+                cg.add(trigger.set_expected_rgb(rgb["red"], rgb["green"], rgb["blue"]))
+                for rgb_light_id in completion[CONF_RGB_LIGHT_IDS]:
+                    cg.add(trigger.add_rgb_light(await cg.get_variable(rgb_light_id)))
             cg.add(trigger.set_completion_timeout(
                 completion[CONF_TIMEOUT].total_milliseconds))
         cg.add(var.add_inbound_binding(trigger))
