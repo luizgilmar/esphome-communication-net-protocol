@@ -49,7 +49,37 @@ int main() {
   assert(guard.begin("other", 1, 11, toggle_on, sizeof(toggle_on)) == InboundDecision::FULL);
   assert(guard.clear_source_session("sender", 1) == 1);
   assert(guard.clear_source_session("sender", 2) == 0);
-  assert(guard.begin("other", 1, 11, toggle_on, sizeof(toggle_on)) == InboundDecision::NEW_COMMAND);
-  assert(guard.begin("sender", 1, 10, toggle_on, sizeof(toggle_on)) == InboundDecision::FULL);
+  // Old session remains a tombstone; accepting it again is the adapter's job
+  // only after validating a genuinely new boot session.
+  assert(guard.begin("other", 1, 11, toggle_on, sizeof(toggle_on)) == InboundDecision::FULL);
+  assert(guard.begin("sender", 1, 10, toggle_on, sizeof(toggle_on)) == InboundDecision::RETIRED);
+
+  InboundReplayGuard<2, 16, 8> rotating;
+  for (uint64_t transaction = 1; transaction <= 25; ++transaction) {
+    assert(rotating.begin("sender", 17, transaction, toggle_on,
+                          sizeof(toggle_on)) == InboundDecision::NEW_COMMAND);
+    assert(rotating.finish("sender", 17, transaction, toggle_on,
+                           sizeof(toggle_on),
+                           {InboundTerminalStatus::SUCCEEDED, confirmed,
+                            sizeof(confirmed)}));
+  }
+  assert(rotating.begin("sender", 17, 1, toggle_on,
+                        sizeof(toggle_on)) == InboundDecision::RETIRED);
+  assert(rotating.begin("sender", 17, 25, toggle_on,
+                        sizeof(toggle_on)) == InboundDecision::DUPLICATE_TERMINAL);
+  assert(rotating.begin("sender", 17, 26, toggle_on,
+                        sizeof(toggle_on)) == InboundDecision::NEW_COMMAND);
+  assert(rotating.begin("sender", 17, 20, toggle_on,
+                        sizeof(toggle_on)) == InboundDecision::RETIRED);
+
+  InboundReplayGuard<2, 16, 8> pending;
+  assert(pending.begin("sender", 17, 1, toggle_on,
+                       sizeof(toggle_on)) == InboundDecision::NEW_COMMAND);
+  assert(pending.begin("sender", 17, 2, toggle_on,
+                       sizeof(toggle_on)) == InboundDecision::NEW_COMMAND);
+  assert(pending.begin("sender", 17, 3, toggle_on,
+                       sizeof(toggle_on)) == InboundDecision::FULL);
+  assert(pending.begin("sender", 17, 1, toggle_on,
+                       sizeof(toggle_on)) == InboundDecision::DUPLICATE_PENDING);
   return 0;
 }

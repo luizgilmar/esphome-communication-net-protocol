@@ -1,8 +1,4 @@
-"""Declarative foundation for cross-transport application commands.
-
-No transport is activated in this milestone; existing MQTT and ESP-NOW
-command paths retain ownership until the pilot migration is complete.
-"""
+"""Declarative cross-transport application commands."""
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -21,6 +17,10 @@ CONF_SESSION_PREFIX = "session_prefix"
 CONF_ESP_NOW = "esp_now"
 CONF_ESPNOW_NET_PROTOCOL_ID = "espnow_net_protocol_id"
 CONF_OBSERVE_INBOUND = "observe_inbound"
+CONF_EXECUTE_INBOUND = "execute_inbound"
+CONF_COMMAND_TARGET = "command_target"
+CONF_SOURCE_ID = "source_id"
+CONF_REPLY_TOPIC = "reply_topic"
 CONF_POLICIES = "policies"
 CONF_TRANSPORTS = "transports"
 CONF_DESTINATIONS = "destinations"
@@ -92,6 +92,10 @@ def _mqtt_id(value):
 MQTT_SCHEMA = cv.Schema({
     cv.Required(CONF_MQTT_ID): _mqtt_id,
     cv.Optional(CONF_LISTEN_COMMANDS, default=False): cv.boolean,
+    cv.Optional(CONF_EXECUTE_INBOUND, default=False): cv.boolean,
+    cv.Optional(CONF_COMMAND_TARGET): _topic_segment(63, "command_target"),
+    cv.Optional(CONF_SOURCE_ID): _topic_segment(63, "source_id"),
+    cv.Optional(CONF_REPLY_TOPIC): _prefix,
     cv.Optional(CONF_LISTEN_RESULTS, default=False): cv.boolean,
     cv.Optional(CONF_OBSERVE_OUTGOING_TARGET): _topic_segment(63, "observe_outgoing_target"),
     cv.Optional(CONF_COMMAND_PREFIX, default="tx/commands"): _prefix,
@@ -102,6 +106,7 @@ MQTT_SCHEMA = cv.Schema({
 ESPNOW_SCHEMA = cv.Schema({
     cv.Required(CONF_ESPNOW_NET_PROTOCOL_ID): cv.use_id(cg.Component),
     cv.Optional(CONF_OBSERVE_INBOUND, default=False): cv.boolean,
+    cv.Optional(CONF_EXECUTE_INBOUND, default=False): cv.boolean,
 })
 
 POLICY_SCHEMA = cv.Schema({
@@ -145,9 +150,22 @@ INBOUND_SCHEMA = cv.Schema({
 
 def _validate(config):
     esp_now = config.get(CONF_ESP_NOW)
+    mqtt = config.get(CONF_MQTT)
+    active = (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt and mqtt[CONF_EXECUTE_INBOUND])
+    if active:
+        if not esp_now or not mqtt or not mqtt[CONF_EXECUTE_INBOUND] or CONF_INBOUND not in config:
+            raise cv.Invalid("execute_inbound currently requires MQTT, ESP-NOW and inbound.bindings")
+        if mqtt and mqtt[CONF_EXECUTE_INBOUND] and (not mqtt[CONF_LISTEN_COMMANDS] or
+                CONF_SOURCE_ID not in mqtt or CONF_REPLY_TOPIC not in mqtt or
+                CONF_COMMAND_TARGET not in mqtt):
+            raise cv.Invalid("MQTT execution requires listen_commands, command_target, source_id and reply_topic")
+        if not esp_now[CONF_OBSERVE_INBOUND]:
+            raise cv.Invalid("ESP-NOW execution requires observe_inbound: true for verified peer identity")
+        for binding in config[CONF_INBOUND][CONF_BINDINGS]:
+            if CONF_COMPLETION not in binding:
+                raise cv.Invalid("active inbound bindings require completion")
     if esp_now and esp_now[CONF_OBSERVE_INBOUND] and CONF_INBOUND not in config:
         raise cv.Invalid("esp_now.observe_inbound requires inbound.bindings")
-    mqtt = config.get(CONF_MQTT)
     if mqtt and CONF_OBSERVE_OUTGOING_TARGET in mqtt and not mqtt[CONF_LISTEN_RESULTS]:
         raise cv.Invalid("observe_outgoing_target requires listen_results: true")
     if CONF_INBOUND in config:
@@ -207,9 +225,12 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
+    esp_now = config.get(CONF_ESP_NOW)
+    mqtt_config = config.get(CONF_MQTT)
+    if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):
+        cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
     if CONF_INBOUND in config:
         cg.add_define("USE_COMMUNICATION_NET_INBOUND")
-    esp_now = config.get(CONF_ESP_NOW)
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         cg.add_define("USE_COMMUNICATION_NET_ESPNOW_OBSERVER")
     var = cg.new_Pvariable(config[CONF_ID])
@@ -219,6 +240,7 @@ async def to_code(config):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))
         trigger = cg.new_Pvariable(binding[CONF_TRIGGER_ID])
+        cg.add(trigger.set_route_id(binding[CONF_ID]))
         if CONF_COMPLETION in binding:
             completion = binding[CONF_COMPLETION]
             state = await cg.get_variable(completion[CONF_LIGHT_ID])
@@ -231,12 +253,16 @@ async def to_code(config):
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
         cg.add(var.set_espnow_observation_source(protocol))
-    mqtt_config = config.get(CONF_MQTT)
+        if esp_now[CONF_EXECUTE_INBOUND]:
+            cg.add(var.activate_inbound_executor(protocol))
+    if mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]:
+        cg.add(var.set_mqtt_inbound_execution(mqtt_config[CONF_SOURCE_ID],
+                                              mqtt_config[CONF_REPLY_TOPIC]))
     if mqtt_config and (mqtt_config[CONF_LISTEN_COMMANDS] or mqtt_config[CONF_LISTEN_RESULTS]):
         cg.add_define("USE_COMMUNICATION_NET_MQTT_LISTENER")
     if mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS]:
         command_topic = (
-            f"{mqtt_config[CONF_COMMAND_PREFIX]}/{config[CONF_DEVICE_ID]}/command"
+            f"{mqtt_config[CONF_COMMAND_PREFIX]}/{mqtt_config.get(CONF_COMMAND_TARGET, config[CONF_DEVICE_ID])}/command"
         )
         if len(command_topic.encode("utf-8")) > 192:
             raise cv.Invalid("composed MQTT command topic exceeds 192 bytes")

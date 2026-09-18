@@ -14,6 +14,17 @@ struct MqttCommandIdentity {
   uint64_t source_boot_id{0};
 };
 
+struct MqttCommandFields {
+  char source[64]{};
+  char device[64]{};
+  char resource[64]{};
+  char action[64]{};
+  char reply_topic[193]{};
+  uint64_t transaction_id{0};
+  uint64_t source_boot_id{0};
+  uint32_t timeout_ms{0};
+};
+
 // Receive-only compatibility decoder for the current cross-device MQTT wire
 // envelope. No source field here authenticates a sender, and this decoder must
 // not grant execution rights. Commands with arguments need a separate codec.
@@ -25,9 +36,12 @@ class MqttEnvelopeReader {
   bool decode(const char *expected_device, uint8_t *canonical, size_t capacity,
               size_t &written, MqttCommandIdentity *identity = nullptr,
               const char *expected_source = nullptr,
-              const char *expected_reply = nullptr) {
+              const char *expected_reply = nullptr,
+              MqttCommandFields *fields = nullptr) {
     written = 0;
     if (identity) *identity = {};
+    if (fields) *fields = {};
+    timeout_ms_ = 0;
     if (!payload_ || !expected_device || !canonical || length_ == 0 ||
         length_ > 1280 || !object_open_()) return false;
     unsigned seen = 0;
@@ -78,6 +92,16 @@ class MqttEnvelopeReader {
     if (!encode_canonical_command({device, resource, action, nullptr, 0},
                                   canonical, capacity, written)) return false;
     if (identity) *identity = {transaction_id, source_boot_id};
+    if (fields) {
+      std::strcpy(fields->source, source_device);
+      std::strcpy(fields->device, device);
+      std::strcpy(fields->resource, resource);
+      std::strcpy(fields->action, action);
+      std::strcpy(fields->reply_topic, reply_topic);
+      fields->transaction_id = transaction_id;
+      fields->source_boot_id = source_boot_id;
+      fields->timeout_ms = timeout_ms_;
+    }
     return true;
   }
 
@@ -151,7 +175,9 @@ class MqttEnvelopeReader {
       value = value * 10 + digit;
       ++digits;
     }
-    return digits != 0 && value != 0 && !(leading_zero && digits > 1);
+    if (digits == 0 || value == 0 || (leading_zero && digits > 1)) return false;
+    timeout_ms_ = value;
+    return true;
   }
 
   bool decimal_(const char *value, uint64_t *out = nullptr) const {
@@ -198,6 +224,7 @@ class MqttEnvelopeReader {
   const uint8_t *payload_;
   size_t length_;
   size_t pos_{0};
+  uint32_t timeout_ms_{0};
 };
 
 inline bool decode_mqtt_command_envelope(const uint8_t *payload, size_t length,
@@ -206,10 +233,12 @@ inline bool decode_mqtt_command_envelope(const uint8_t *payload, size_t length,
                                          size_t &written,
                                          MqttCommandIdentity *identity = nullptr,
                                          const char *expected_source = nullptr,
-                                         const char *expected_reply = nullptr) {
+                                         const char *expected_reply = nullptr,
+                                         MqttCommandFields *fields = nullptr) {
   return MqttEnvelopeReader(payload, length).decode(expected_device, canonical,
                                                      capacity, written, identity,
-                                                     expected_source, expected_reply);
+                                                     expected_source, expected_reply,
+                                                     fields);
 }
 
 }  // namespace communication_net_protocol

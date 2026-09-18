@@ -5,6 +5,10 @@
 #include "mqtt_envelope_decoder.h"
 #include "mqtt_result_decoder.h"
 #include <cstring>
+#include <cstdio>
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+#include "esphome/components/light/light_state.h"
+#endif
 
 namespace esphome {
 namespace communication_net_protocol {
@@ -15,6 +19,9 @@ static const char *const TAG = "communication_net_protocol";
 void CommunicationNetProtocolComponent::on_command_identity(
     espnow_net_protocol::PeerIndex peer,
     const espnow_net_protocol::NetCommand &command) {
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  this->verified_command_ = &command;
+#else
   uint8_t canonical[192]{};
   size_t length = 0;
   const char *route = nullptr;
@@ -28,10 +35,281 @@ void CommunicationNetProtocolComponent::on_command_identity(
            static_cast<unsigned long long>(command.transaction_id),
            matched ? route : "<unmatched>",
            static_cast<unsigned>(length));
+#endif
+}
+#endif
+
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+using NetCommand = espnow_net_protocol::NetCommand;
+using NetResult = espnow_net_protocol::NetResult;
+using NetStatus = espnow_net_protocol::NetResultStatus;
+using NetStart = espnow_net_protocol::NetCommandHandlerStartStatus;
+
+NetStart CommunicationNetProtocolComponent::start(const NetCommand &command,
+                                                   uint32_t now_ms) {
+  const bool verified = this->verified_command_ == &command;
+  this->verified_command_ = nullptr;
+  if (!verified) return NetStart::REJECTED;
+  return this->start_inbound_(command, now_ms, true);
+}
+
+NetStart CommunicationNetProtocolComponent::start_inbound_(
+    const NetCommand &command, uint32_t now_ms, bool radio) {
+  if (!this->inbound_routes_valid_ || this->radio_result_ready_ ||
+      this->mqtt_result_ready_) return NetStart::BUSY;
+  if (!command.valid() || (command.payload.size() != 0 &&
+      (command.payload.size() != 2 || command.payload.data()[0] != '{' ||
+       command.payload.data()[1] != '}'))) return NetStart::INVALID_COMMAND;
+  const InboundCommandView view{
+      command.source_device_id.c_str(), command.source_boot_id,
+      command.transaction_id,
+      {command.device_id.c_str(), command.resource.c_str(),
+       command.name.c_str(), nullptr, 0}};
+  if (this->inbound_active_ &&
+      command.transaction_id != this->active_command_.transaction_id)
+    return NetStart::BUSY;
+  const char *route = nullptr;
+  const InboundDecision decision = this->route_admission_.admit(view, route);
+  if (decision == InboundDecision::DUPLICATE_TERMINAL) {
+    uint8_t encoded[256]{};
+    size_t size = 0;
+    InboundTerminalStatus status{};
+    NetResult replay{};
+    if (!this->route_admission_.replay_terminal(
+            view, status, encoded, sizeof(encoded), size) ||
+        !this->result_codec_.decode(command.transaction_id, encoded, size,
+                                    0, replay)) return NetStart::REJECTED;
+    if (radio) {
+      if (this->radio_result_ready_) return NetStart::BUSY;
+      this->inbound_result_ = replay;
+      this->radio_result_ready_ = true;
+    } else {
+      this->inbound_result_ = replay;
+      this->mqtt_result_ready_ = true;
+    }
+    return NetStart::STARTED;
+  }
+  if (decision == InboundDecision::DUPLICATE_PENDING &&
+      this->inbound_active_ &&
+      command.transaction_id == this->active_command_.transaction_id) {
+    if (radio != this->radio_waiting_) return NetStart::BUSY;
+    this->inbound_result_ = {};
+    this->inbound_result_.transaction_id = command.transaction_id;
+    this->inbound_result_.status = NetStatus::IN_PROGRESS;
+    this->inbound_result_.execution.started = true;
+    this->inbound_result_.execution.has_estimated_completion = true;
+    this->inbound_result_.execution.estimated_completion_ms =
+        this->inbound_timeout_ms_;
+    if (radio) this->radio_result_ready_ = true;
+    else this->mqtt_result_ready_ = true;
+    return NetStart::STARTED;
+  }
+  if (decision != InboundDecision::NEW_COMMAND) return NetStart::REJECTED;
+  DeclarativeInboundBinding *binding = nullptr;
+  for (size_t i = 0; i < this->inbound_binding_count_; ++i)
+    if (std::strcmp(this->inbound_bindings_[i]->route_id(), route) == 0) {
+      binding = this->inbound_bindings_[i];
+      break;
+    }
+  if (binding == nullptr) {
+    (void) this->route_admission_.complete(
+        view, {InboundTerminalStatus::REJECTED, nullptr, 0});
+    return NetStart::REJECTED;
+  }
+  this->active_command_ = command;
+  this->active_binding_ = binding;
+  this->inbound_started_ms_ = now_ms;
+  this->inbound_timeout_ms_ = binding->completion_timeout();
+  this->radio_waiting_ = radio;
+  this->mqtt_waiting_ = !radio;
+  this->inbound_active_ = true;
+  ESP_LOGI(TAG, "Inbound route=%s transport=%s tx=%llu",
+           route, radio ? "esp_now" : "mqtt",
+           static_cast<unsigned long long>(command.transaction_id));
+  if (binding->light() != nullptr) {
+    const bool on = binding->light()->current_values.is_on();
+    this->inbound_expected_on_ =
+        binding->expected() == LightExpectedState::ON ||
+        (binding->expected() == LightExpectedState::TOGGLED && !on);
+  }
+  binding->trigger();
+  if (binding->light() == nullptr) {
+    NetResult immediate{};
+    immediate.transaction_id = command.transaction_id;
+    immediate.status = NetStatus::SUCCEEDED;
+    immediate.execution.started = true;
+    this->finish_inbound_(immediate);
+  } else {
+    this->inbound_result_ = {};
+    this->inbound_result_.transaction_id = command.transaction_id;
+    this->inbound_result_.status = NetStatus::IN_PROGRESS;
+    this->inbound_result_.execution.started = true;
+    this->inbound_result_.execution.has_estimated_completion = true;
+    this->inbound_result_.execution.estimated_completion_ms =
+        this->inbound_timeout_ms_;
+    if (radio) this->radio_result_ready_ = true;
+    else this->mqtt_result_ready_ = true;
+  }
+  return NetStart::STARTED;
+}
+
+void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
+  if (!this->inbound_active_ || this->radio_result_ready_ ||
+      this->mqtt_result_ready_ || this->active_binding_ == nullptr ||
+      this->active_binding_->light() == nullptr) return;
+  const bool completed = this->active_binding_->light()->current_values.is_on() ==
+                         this->inbound_expected_on_;
+  const bool timed_out = now_ms - this->inbound_started_ms_ >=
+                         this->inbound_timeout_ms_;
+  if (!completed && !timed_out) return;
+  NetResult result{};
+  result.transaction_id = this->active_command_.transaction_id;
+  result.latency_ms = now_ms - this->inbound_started_ms_;
+  result.execution.started = true;
+  if (completed) {
+    result.status = NetStatus::SUCCEEDED;
+    result.remote_state.completeness =
+        espnow_net_protocol::NetStateCompleteness::COMPLETE;
+    const uint8_t state = this->inbound_expected_on_ ? 1 : 0;
+    result.remote_state.schema.assign("binary-state/v1");
+    result.remote_state.data.assign(&state, 1);
+  } else {
+    result.status = NetStatus::FAILED;
+    result.error.code = espnow_net_protocol::NetErrorCode::TIMED_OUT;
+    result.error.message.assign("declared completion state not observed");
+  }
+  this->finish_inbound_(result);
+}
+
+void CommunicationNetProtocolComponent::finish_inbound_(NetResult result) {
+  espnow_net_protocol::EspNowResultPayload encoded{};
+  if (this->result_codec_.encode(result, encoded) &&
+      encoded.data.size() <= 256) {
+    const auto status = result.status == NetStatus::SUCCEEDED
+                            ? InboundTerminalStatus::SUCCEEDED
+                            : InboundTerminalStatus::FAILED;
+    const InboundCommandView view{
+        this->active_command_.source_device_id.c_str(),
+        this->active_command_.source_boot_id,
+        this->active_command_.transaction_id,
+        {this->active_command_.device_id.c_str(),
+         this->active_command_.resource.c_str(),
+         this->active_command_.name.c_str(), nullptr, 0}};
+    (void) this->route_admission_.complete(
+        view, {status, encoded.data.data(), encoded.data.size()});
+  }
+  this->inbound_active_ = false;
+  this->active_binding_ = nullptr;
+  ESP_LOGI(TAG, "Inbound completed tx=%llu result=%u",
+           static_cast<unsigned long long>(result.transaction_id),
+           static_cast<unsigned>(result.status));
+  this->inbound_result_ = result;
+  this->radio_result_ready_ = this->radio_waiting_;
+  this->mqtt_result_ready_ = this->mqtt_waiting_;
+}
+
+bool CommunicationNetProtocolComponent::take_result(NetResult &result) {
+  if (!this->radio_result_ready_) return false;
+  result = this->inbound_result_;
+  this->radio_result_ready_ = false;
+  if (result.status != NetStatus::IN_PROGRESS) this->radio_waiting_ = false;
+  return true;
+}
+
+bool CommunicationNetProtocolComponent::cancel(uint64_t transaction_id) {
+  if (!this->inbound_active_ ||
+      this->active_command_.transaction_id != transaction_id) return false;
+  // Execution might already have happened; leave this transaction reserved.
+  this->inbound_active_ = false;
+  this->active_binding_ = nullptr;
+  return true;
+}
+
+void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
+    const uint8_t *payload, size_t length) {
+  uint8_t canonical[192]{};
+  size_t canonical_size = 0;
+  MqttCommandFields fields{};
+  if (!decode_mqtt_command_envelope(
+          payload, length, this->device_id_, canonical, sizeof(canonical),
+          canonical_size, nullptr, this->mqtt_execution_source_,
+          this->mqtt_execution_reply_, &fields) ||
+      fields.source_boot_id == 0 || fields.timeout_ms == 0) {
+    ESP_LOGW(TAG, "Inbound MQTT envelope rejected");
+    return;
+  }
+  NetCommand command{};
+  command.transaction_id = fields.transaction_id;
+  command.source_boot_id = fields.source_boot_id;
+  command.timeout_ms = fields.timeout_ms;
+  if (!command.source_device_id.assign(fields.source) ||
+      !command.device_id.assign(fields.device) ||
+      !command.resource.assign(fields.resource) ||
+      !command.name.assign(fields.action) ||
+      !command.payload.assign(reinterpret_cast<const uint8_t *>("{}"), 2))
+    return;
+  const NetStart status = this->start_inbound_(command, millis(), false);
+  if (status != NetStart::STARTED) {
+    char result[256]{};
+    const int size = std::snprintf(
+        result, sizeof(result),
+        "{\"transaction_id\":\"%llu\",\"result\":\"rejected\","
+        "\"execution\":{\"started\":false},\"error\":{"
+        "\"code\":\"remote_rejected\",\"retryable\":false}}",
+        static_cast<unsigned long long>(fields.transaction_id));
+    if (size > 0 && static_cast<size_t>(size) < sizeof(result))
+      this->mqtt_wire_.publish(this->mqtt_execution_reply_,
+                               reinterpret_cast<const uint8_t *>(result),
+                               static_cast<size_t>(size));
+  }
+}
+
+void CommunicationNetProtocolComponent::publish_inbound_result_() {
+  if (!this->mqtt_result_ready_ || this->mqtt_execution_reply_ == nullptr)
+    return;
+  const NetResult &result = this->inbound_result_;
+  const char *status = result.status == NetStatus::SUCCEEDED ? "succeeded" :
+                       result.status == NetStatus::IN_PROGRESS ? "in_progress" :
+                       result.status == NetStatus::REJECTED ? "rejected" : "failed";
+  char payload[384]{};
+  int size = 0;
+  if (result.status == NetStatus::IN_PROGRESS) {
+    size = std::snprintf(payload, sizeof(payload),
+                         "{\"transaction_id\":\"%llu\",\"result\":\"in_progress\","
+                         "\"execution\":{\"started\":true,\"estimated_completion_ms\":%u}}",
+                         static_cast<unsigned long long>(result.transaction_id),
+                         static_cast<unsigned>(result.execution.estimated_completion_ms));
+  } else if (result.status == NetStatus::SUCCEEDED) {
+    const bool on = result.remote_state.data.size() == 1 &&
+                    result.remote_state.data.data()[0] == 1;
+    size = std::snprintf(payload, sizeof(payload),
+                         "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
+                         "\"execution\":{\"started\":true},\"remote_state\":{"
+                         "\"complete\":true,\"value\":{\"on\":%s}}}",
+                         static_cast<unsigned long long>(result.transaction_id),
+                         on ? "true" : "false");
+  } else {
+    size = std::snprintf(payload, sizeof(payload),
+                         "{\"transaction_id\":\"%llu\",\"result\":\"%s\","
+                         "\"execution\":{\"started\":true},\"error\":{"
+                         "\"code\":\"timed_out\",\"retryable\":false}}",
+                         static_cast<unsigned long long>(result.transaction_id), status);
+  }
+  if (size > 0 && static_cast<size_t>(size) < sizeof(payload) &&
+      this->mqtt_wire_.publish(this->mqtt_execution_reply_,
+                               reinterpret_cast<const uint8_t *>(payload),
+                               static_cast<size_t>(size))) {
+    this->mqtt_result_ready_ = false;
+    if (result.status != NetStatus::IN_PROGRESS) this->mqtt_waiting_ = false;
+  }
 }
 #endif
 
 void CommunicationNetProtocolComponent::loop() {
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  this->loop(millis());
+  this->publish_inbound_result_();
+#endif
 #if defined(USE_MQTT) && defined(USE_COMMUNICATION_NET_MQTT_LISTENER)
   if (this->mqtt_command_topic_ && !this->mqtt_command_subscription_registered_) {
     this->mqtt_command_subscription_registered_ =
@@ -100,6 +378,12 @@ void CommunicationNetProtocolComponent::loop() {
     }
     if (!this->mqtt_command_topic_ ||
         std::strcmp(this->received_topic_, this->mqtt_command_topic_) != 0) return;
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+    if (this->mqtt_execution_source_ != nullptr) {
+      this->receive_mqtt_inbound_(this->received_payload_, payload_length);
+      return;
+    }
+#endif
     ++this->observed_commands_;
     ESP_LOGD(TAG, "MQTT command observed bytes=%u count=%u (not executed)",
              static_cast<unsigned>(payload_length),
@@ -125,7 +409,11 @@ void CommunicationNetProtocolComponent::loop() {
 }
 
 void CommunicationNetProtocolComponent::dump_config() {
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  ESP_LOGCONFIG(TAG, "Communication NetProtocol: inbound executor enabled");
+#else
   ESP_LOGCONFIG(TAG, "Communication NetProtocol: FOUNDATION ONLY (routing disabled)");
+#endif
   ESP_LOGCONFIG(TAG, "  Device ID: %s", this->device_id_ == nullptr ? "" : this->device_id_);
 #ifdef USE_COMMUNICATION_NET_INBOUND
   ESP_LOGCONFIG(TAG, "  Inbound route declarations: %u (dispatch disabled)",

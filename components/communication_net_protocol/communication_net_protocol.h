@@ -6,6 +6,7 @@
 #include "inbound_route_registry.h"
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
 #include "route_admission.h"
+#include "esphome/components/espnow_net_protocol/result_codec.h"
 #endif
 #include "declarative_inbound_binding.h"
 #include "passive_inbound_inspector.h"
@@ -28,6 +29,9 @@ class CommunicationNetProtocolComponent : public Component
 #ifdef USE_COMMUNICATION_NET_ESPNOW_OBSERVER
     , public espnow_net_protocol::NetCommandIdentityObserver
 #endif
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+    , public espnow_net_protocol::NetCommandHandler
+#endif
 {
  public:
   void set_device_id(const char *device_id) {
@@ -45,6 +49,22 @@ class CommunicationNetProtocolComponent : public Component
   }
   void on_command_identity(espnow_net_protocol::PeerIndex peer,
                            const espnow_net_protocol::NetCommand &command) override;
+#endif
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  void activate_inbound_executor(
+      espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
+    if (endpoint != nullptr) endpoint->set_command_handler(this);
+  }
+  espnow_net_protocol::NetCommandHandlerStartStatus start(
+      const espnow_net_protocol::NetCommand &command, uint32_t now_ms) override;
+  void loop(uint32_t now_ms) override;
+  bool has_result() const override { return radio_result_ready_; }
+  bool take_result(espnow_net_protocol::NetResult &result) override;
+  bool cancel(uint64_t transaction_id) override;
+  void set_mqtt_inbound_execution(const char *source, const char *reply_topic) {
+    mqtt_execution_source_ = source;
+    mqtt_execution_reply_ = reply_topic;
+  }
 #endif
   void setup() override {}
   void loop() override;
@@ -89,6 +109,27 @@ class CommunicationNetProtocolComponent : public Component
   bool inbound_routes_valid_{true};
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   RouteAdmission<8, 16> route_admission_{nullptr, inbound_routes_};
+  const espnow_net_protocol::NetCommand *verified_command_{nullptr};
+  espnow_net_protocol::NetCommand active_command_{};
+  espnow_net_protocol::NetResult inbound_result_{};
+  espnow_net_protocol::EspNowResultCodec result_codec_{};
+  DeclarativeInboundBinding *active_binding_{nullptr};
+  const char *mqtt_execution_source_{nullptr};
+  const char *mqtt_execution_reply_{nullptr};
+  uint32_t inbound_started_ms_{0};
+  uint32_t inbound_timeout_ms_{0};
+  bool inbound_expected_on_{false};
+  bool inbound_active_{false};
+  bool radio_waiting_{false};
+  bool mqtt_waiting_{false};
+  bool radio_result_ready_{false};
+  bool mqtt_result_ready_{false};
+  espnow_net_protocol::NetCommandHandlerStartStatus start_inbound_(
+      const espnow_net_protocol::NetCommand &command, uint32_t now_ms,
+      bool radio);
+  void finish_inbound_(espnow_net_protocol::NetResult result);
+  void receive_mqtt_inbound_(const uint8_t *payload, size_t length);
+  void publish_inbound_result_();
 #endif
   DeclarativeInboundBinding *inbound_bindings_[16]{};
   size_t inbound_binding_count_{0};

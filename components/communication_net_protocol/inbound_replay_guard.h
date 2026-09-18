@@ -14,6 +14,7 @@ enum class InboundDecision : uint8_t {
   CONFLICT,
   INVALID,
   FULL,
+  RETIRED,
 };
 
 enum class InboundTerminalStatus : uint8_t { SUCCEEDED, REJECTED, FAILED };
@@ -27,8 +28,8 @@ struct InboundTerminalView {
 };
 
 // One device-wide table for inbound commands, regardless of wire transport.
-// Entries are deliberately not evicted automatically: an expired transaction
-// must not silently execute a repeated, non-idempotent action.
+// Old terminal entries may be evicted after recording a session watermark;
+// pending entries are retained so uncertain actions cannot run again.
 template<size_t Capacity, size_t MaxSource = 63, size_t MaxCommand = 192,
          size_t MaxTerminal = 256>
 class InboundReplayGuard {
@@ -56,17 +57,51 @@ class InboundReplayGuard {
       return entry.terminal ? InboundDecision::DUPLICATE_TERMINAL
                             : InboundDecision::DUPLICATE_PENDING;
     }
-    for (auto &entry : entries_) {
-      if (entry.occupied) continue;
-      std::memcpy(entry.source_id, source_id, source_length + 1);
-      entry.source_boot_id = source_boot_id;
-      entry.transaction_id = transaction_id;
-      std::memcpy(entry.command, command, command_length);
-      entry.command_length = command_length;
-      entry.occupied = true;
-      return InboundDecision::NEW_COMMAND;
+    Session *session = this->find_session_(source_id, source_boot_id);
+    if (session != nullptr && transaction_id <= session->retired_through)
+      return InboundDecision::RETIRED;
+    if (session == nullptr) {
+      for (auto &candidate : sessions_) {
+        if (candidate.occupied) continue;
+        session = &candidate;
+        break;
+      }
+      if (session == nullptr) return InboundDecision::FULL;
     }
-    return InboundDecision::FULL;
+    Entry *free_entry = nullptr;
+    for (auto &entry : entries_) {
+      if (!entry.occupied) { free_entry = &entry; break; }
+    }
+    if (free_entry == nullptr) {
+      // Reuse the oldest terminal entry. Pending operations are never evicted.
+      for (auto &entry : entries_) {
+        if (!entry.terminal || !entry.occupied) continue;
+        if (free_entry == nullptr || entry.sequence < free_entry->sequence)
+          free_entry = &entry;
+      }
+      if (free_entry == nullptr) return InboundDecision::FULL;
+      Session *retired = find_session_(free_entry->source_id,
+                                       free_entry->source_boot_id);
+      if (retired == nullptr) return InboundDecision::FULL;
+      if (retired->retired_through < free_entry->transaction_id)
+        retired->retired_through = free_entry->transaction_id;
+      if (retired == session && transaction_id <= session->retired_through)
+        return InboundDecision::RETIRED;
+    }
+    if (!session->occupied) {
+      std::memcpy(session->source_id, source_id, source_length + 1);
+      session->source_boot_id = source_boot_id;
+      session->occupied = true;
+    }
+    *free_entry = {};
+    std::memcpy(free_entry->source_id, source_id, source_length + 1);
+    free_entry->source_boot_id = source_boot_id;
+    free_entry->transaction_id = transaction_id;
+    std::memcpy(free_entry->command, command, command_length);
+    free_entry->command_length = command_length;
+    free_entry->sequence = ++sequence_;
+    free_entry->occupied = true;
+    return InboundDecision::NEW_COMMAND;
   }
 
   // Mark terminal only after the device adapter confirms its final outcome.
@@ -130,6 +165,9 @@ class InboundReplayGuard {
       if (!entry.occupied || !entry.terminal ||
           entry.source_boot_id != old_boot_id ||
           std::strcmp(entry.source_id, source_id) != 0) continue;
+      Session *session = find_session_(entry.source_id, entry.source_boot_id);
+      if (session != nullptr && session->retired_through < entry.transaction_id)
+        session->retired_through = entry.transaction_id;
       entry = {};
       ++removed;
     }
@@ -148,7 +186,22 @@ class InboundReplayGuard {
     InboundTerminalStatus terminal_status{InboundTerminalStatus::FAILED};
     bool occupied{false};
     bool terminal{false};
+    uint64_t sequence{0};
   };
+
+  struct Session {
+    char source_id[MaxSource + 1]{};
+    uint64_t source_boot_id{0};
+    uint64_t retired_through{0};
+    bool occupied{false};
+  };
+
+  Session *find_session_(const char *source_id, uint64_t source_boot_id) {
+    for (auto &session : sessions_)
+      if (session.occupied && session.source_boot_id == source_boot_id &&
+          std::strcmp(session.source_id, source_id) == 0) return &session;
+    return nullptr;
+  }
 
   static size_t bounded_length_(const char *value) {
     size_t length = 0;
@@ -157,6 +210,10 @@ class InboundReplayGuard {
   }
 
   Entry entries_[Capacity]{};
+  // One compact watermark per sender session. Do not erase a watermark while
+  // its boot ID can still be accepted by a transport adapter.
+  Session sessions_[Capacity]{};
+  uint64_t sequence_{0};
 };
 
 }  // namespace communication_net_protocol
