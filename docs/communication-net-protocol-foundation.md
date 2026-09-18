@@ -269,9 +269,10 @@ must verify sender identity *before* calling the gate, and call it in the
 cooperative loop rather than a network callback. Only `NEW_COMMAND` allows
 the device adapter to execute; a duplicate never invokes the executor again.
 The gate includes neither transport nor device headers and has no hard-coded
-device/resource IDs. **This is not wired into either transport yet.** Before
-automatic fallback, fence stale sessions and define behavior after a receiver
-reboot. Host validation:
+device/resource IDs. With `execute_inbound: true`, MQTT and verified ESP-NOW
+share the same route admission and terminal replay on the receiver. The replay
+table is volatile across receiver reboot; session transitions and durable
+deduplication remain explicit protocol limits. Host validation:
 `tests/inbound_command_gate_test.cpp`.
 
 The gate stores a bounded, transport-neutral terminal outcome (status and up
@@ -295,3 +296,28 @@ The passive build includes its bounded route table but omits the replay
 table. The replay table must be enabled together with an executor that marks
 the terminal outcome; admitting observational traffic would otherwise fill
 the table and deny subsequent commands.
+
+`InboundExecutionLifecycle` now tests reservation, executor start, terminal
+completion and terminal replay against the same table without additional
+permanent storage. This is a host-tested contract, not a live receiver yet.
+The bounded table can now retire its oldest completed entry while preserving
+the greatest retired transaction ID per source and boot session. Later
+commands can continue after eight completions, while an old ID at or below
+that watermark is rejected without re-executing a non-idempotent toggle.
+Detailed result replay is available only while an entry remains cached;
+transport adapters must return a terminal rejection for an older retired ID.
+This ordering rule requires verified source sessions with monotonically
+increasing transaction IDs, and session records remain bounded. Transport
+result publication and source-session validation must be integrated before
+enabling live admission.
+
+## Grouped light completion
+
+Active inbound bindings may declare `completion.additional_light_ids` with up
+to three local light IDs alongside `completion.light_id`. The executor reports
+success only when the primary light and every additional light have reached the
+declared `expected` state. For `toggled`, the expected value is derived from
+the primary light before the automation starts; grouped commands using
+`toggled` should ensure all lights start in a consistent state. `on` and `off`
+apply the same expected value to every light. The route and action remain YAML
+declarations; the state check runs in C++ and is shared by MQTT and ESP-NOW.

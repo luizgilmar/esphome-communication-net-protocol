@@ -36,6 +36,7 @@ CONF_RESOURCE = "resource"
 CONF_COMMAND = "command"
 CONF_COMPLETION = "completion"
 CONF_EXPECTED = "expected"
+CONF_ADDITIONAL_LIGHT_IDS = "additional_light_ids"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -126,6 +127,9 @@ DESTINATION_SCHEMA = cv.Schema({
 
 LIGHT_COMPLETION_SCHEMA = cv.Schema({
     cv.Required(CONF_LIGHT_ID): cv.use_id(light.LightState),
+    cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
+        cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
+    ),
     cv.Optional(CONF_EXPECTED, default="toggled"): cv.enum(
         LIGHT_EXPECTED_STATES, lower=True
     ),
@@ -245,6 +249,8 @@ async def to_code(config):
             completion = binding[CONF_COMPLETION]
             state = await cg.get_variable(completion[CONF_LIGHT_ID])
             cg.add(trigger.set_light(state))
+            for extra_id in completion.get(CONF_ADDITIONAL_LIGHT_IDS, []):
+                cg.add(trigger.add_completion_light(await cg.get_variable(extra_id)))
             cg.add(trigger.set_expected(completion[CONF_EXPECTED]))
             cg.add(trigger.set_completion_timeout(
                 completion[CONF_TIMEOUT].total_milliseconds))

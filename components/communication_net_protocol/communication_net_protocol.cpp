@@ -157,8 +157,10 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
   if (!this->inbound_active_ || this->radio_result_ready_ ||
       this->mqtt_result_ready_ || this->active_binding_ == nullptr ||
       this->active_binding_->light() == nullptr) return;
-  const bool completed = this->active_binding_->light()->current_values.is_on() ==
-                         this->inbound_expected_on_;
+  bool completed = true;
+  for (size_t i = 0; i < this->active_binding_->light_count(); ++i)
+    completed &= this->active_binding_->light_at(i)->current_values.is_on() ==
+                 this->inbound_expected_on_;
   const bool timed_out = now_ms - this->inbound_started_ms_ >=
                          this->inbound_timeout_ms_;
   if (!completed && !timed_out) return;
