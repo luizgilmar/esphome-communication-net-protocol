@@ -122,6 +122,15 @@ template<size_t Capacity> class TransactionTracker {
     return this->find_(transaction_id) != nullptr;
   }
 
+  // Result JSON has no source boot ID. Use the one retained at begin();
+  // unsolicited results cannot allocate or create a transaction.
+  TransactionObserveStatus observe_result(uint64_t transaction_id,
+                                          TransactionStage stage, uint32_t now_ms) {
+    const Slot *slot = this->find_(transaction_id);
+    if (slot == nullptr) return TransactionObserveStatus::UNKNOWN_TRANSACTION;
+    return this->observe(transaction_id, slot->source_boot_id, stage, now_ms);
+  }
+
  private:
   struct Slot {
     uint64_t transaction_id{0};

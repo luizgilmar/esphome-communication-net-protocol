@@ -62,5 +62,11 @@ int main() {
   assert(tracker.confirm_interruption(12, 9, 1070) ==
          TransactionObserveStatus::ALREADY_TERMINAL);
   assert(tracker.take_event(event) && event.stage == TransactionStage::SUCCEEDED);
+  assert(tracker.observe_result(12, TransactionStage::FAILED, 1080) ==
+         TransactionObserveStatus::UNKNOWN_TRANSACTION);
+  assert(tracker.begin(13, 9, 1100, 100));
+  assert(tracker.observe_result(13, TransactionStage::SUCCEEDED, 1120) ==
+         TransactionObserveStatus::ACCEPTED);
+  assert(tracker.take_event(event) && event.stage == TransactionStage::SUCCEEDED);
   return 0;
 }

@@ -6,7 +6,9 @@ command paths retain ownership until the pilot migration is complete.
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID
+from esphome import automation
+from esphome.components import light
+from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
 
@@ -18,6 +20,7 @@ CONF_RESULT_PREFIX = "result_prefix"
 CONF_SESSION_PREFIX = "session_prefix"
 CONF_ESP_NOW = "esp_now"
 CONF_ESPNOW_NET_PROTOCOL_ID = "espnow_net_protocol_id"
+CONF_OBSERVE_INBOUND = "observe_inbound"
 CONF_POLICIES = "policies"
 CONF_TRANSPORTS = "transports"
 CONF_DESTINATIONS = "destinations"
@@ -25,11 +28,28 @@ CONF_POLICY = "policy"
 CONF_ESPNOW_PEER = "espnow_peer"
 CONF_MQTT_TARGET = "mqtt_target"
 CONF_LISTEN_COMMANDS = "listen_commands"
+CONF_LISTEN_RESULTS = "listen_results"
+CONF_OBSERVE_OUTGOING_TARGET = "observe_outgoing_target"
+CONF_INBOUND = "inbound"
+CONF_BINDINGS = "bindings"
+CONF_RESOURCE = "resource"
+CONF_COMMAND = "command"
+CONF_COMPLETION = "completion"
+CONF_EXPECTED = "expected"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
     "CommunicationNetProtocolComponent", cg.Component
 )
+DeclarativeInboundBinding = communication_ns.class_(
+    "DeclarativeInboundBinding", automation.Trigger.template()
+)
+LightExpectedState = communication_ns.enum("LightExpectedState", is_class=True)
+LIGHT_EXPECTED_STATES = {
+    "on": LightExpectedState.ON,
+    "off": LightExpectedState.OFF,
+    "toggled": LightExpectedState.TOGGLED,
+}
 
 
 def _identifier(maximum, label):
@@ -72,13 +92,16 @@ def _mqtt_id(value):
 MQTT_SCHEMA = cv.Schema({
     cv.Required(CONF_MQTT_ID): _mqtt_id,
     cv.Optional(CONF_LISTEN_COMMANDS, default=False): cv.boolean,
+    cv.Optional(CONF_LISTEN_RESULTS, default=False): cv.boolean,
+    cv.Optional(CONF_OBSERVE_OUTGOING_TARGET): _topic_segment(63, "observe_outgoing_target"),
     cv.Optional(CONF_COMMAND_PREFIX, default="tx/commands"): _prefix,
     cv.Optional(CONF_RESULT_PREFIX, default="tx/results"): _prefix,
     cv.Optional(CONF_SESSION_PREFIX, default="tx/sessions"): _prefix,
 })
 
 ESPNOW_SCHEMA = cv.Schema({
-    cv.Required(CONF_ESPNOW_NET_PROTOCOL_ID): _identifier(63, CONF_ESPNOW_NET_PROTOCOL_ID),
+    cv.Required(CONF_ESPNOW_NET_PROTOCOL_ID): cv.use_id(cg.Component),
+    cv.Optional(CONF_OBSERVE_INBOUND, default=False): cv.boolean,
 })
 
 POLICY_SCHEMA = cv.Schema({
@@ -96,8 +119,46 @@ DESTINATION_SCHEMA = cv.Schema({
     cv.Optional(CONF_ESPNOW_PEER): _identifier(63, "espnow_peer"),
 })
 
+LIGHT_COMPLETION_SCHEMA = cv.Schema({
+    cv.Required(CONF_LIGHT_ID): cv.use_id(light.LightState),
+    cv.Optional(CONF_EXPECTED, default="toggled"): cv.enum(
+        LIGHT_EXPECTED_STATES, lower=True
+    ),
+    cv.Optional(CONF_TIMEOUT, default="2s"):
+        cv.positive_time_period_milliseconds,
+})
+
+INBOUND_BINDING_SCHEMA = automation.validate_automation({
+    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(DeclarativeInboundBinding),
+    cv.Required(CONF_ID): _identifier(31, "inbound binding id"),
+    cv.Required(CONF_RESOURCE): _identifier(63, "resource"),
+    cv.Required(CONF_COMMAND): _identifier(63, "command"),
+    cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA,
+}, single=True)
+
+INBOUND_SCHEMA = cv.Schema({
+    cv.Required(CONF_BINDINGS): cv.All(
+        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=16)
+    ),
+})
+
 
 def _validate(config):
+    esp_now = config.get(CONF_ESP_NOW)
+    if esp_now and esp_now[CONF_OBSERVE_INBOUND] and CONF_INBOUND not in config:
+        raise cv.Invalid("esp_now.observe_inbound requires inbound.bindings")
+    mqtt = config.get(CONF_MQTT)
+    if mqtt and CONF_OBSERVE_OUTGOING_TARGET in mqtt and not mqtt[CONF_LISTEN_RESULTS]:
+        raise cv.Invalid("observe_outgoing_target requires listen_results: true")
+    if CONF_INBOUND in config:
+        names, routes = set(), set()
+        for binding in config[CONF_INBOUND][CONF_BINDINGS]:
+            name = binding[CONF_ID]
+            route = (binding[CONF_RESOURCE], binding[CONF_COMMAND])
+            if name in names or route in routes:
+                raise cv.Invalid(f"duplicate inbound binding: {name} {route}")
+            names.add(name)
+            routes.add(route)
     configured = {name for name in (CONF_MQTT, CONF_ESP_NOW) if name in config}
     policies = {}
     for policy in config[CONF_POLICIES]:
@@ -133,6 +194,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Required(CONF_DEVICE_ID): _topic_segment(63, "device_id"),
         cv.Optional(CONF_MQTT): MQTT_SCHEMA,
         cv.Optional(CONF_ESP_NOW): ESPNOW_SCHEMA,
+        cv.Optional(CONF_INBOUND): INBOUND_SCHEMA,
         cv.Required(CONF_POLICIES): cv.All(
             cv.ensure_list(POLICY_SCHEMA), cv.Length(min=1, max=16)
         ),
@@ -145,15 +207,49 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
+    if CONF_INBOUND in config:
+        cg.add_define("USE_COMMUNICATION_NET_INBOUND")
+    esp_now = config.get(CONF_ESP_NOW)
+    if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
+        cg.add_define("USE_COMMUNICATION_NET_ESPNOW_OBSERVER")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
+    for binding in config.get(CONF_INBOUND, {}).get(CONF_BINDINGS, []):
+        cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
+                                     binding[CONF_COMMAND]))
+        trigger = cg.new_Pvariable(binding[CONF_TRIGGER_ID])
+        if CONF_COMPLETION in binding:
+            completion = binding[CONF_COMPLETION]
+            state = await cg.get_variable(completion[CONF_LIGHT_ID])
+            cg.add(trigger.set_light(state))
+            cg.add(trigger.set_expected(completion[CONF_EXPECTED]))
+            cg.add(trigger.set_completion_timeout(
+                completion[CONF_TIMEOUT].total_milliseconds))
+        cg.add(var.add_inbound_binding(trigger))
+        await automation.build_automation(trigger, [], binding)
+    if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
+        protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
+        cg.add(var.set_espnow_observation_source(protocol))
     mqtt_config = config.get(CONF_MQTT)
-    if mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS]:
+    if mqtt_config and (mqtt_config[CONF_LISTEN_COMMANDS] or mqtt_config[CONF_LISTEN_RESULTS]):
         cg.add_define("USE_COMMUNICATION_NET_MQTT_LISTENER")
+    if mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS]:
         command_topic = (
             f"{mqtt_config[CONF_COMMAND_PREFIX]}/{config[CONF_DEVICE_ID]}/command"
         )
         if len(command_topic.encode("utf-8")) > 192:
             raise cv.Invalid("composed MQTT command topic exceeds 192 bytes")
         cg.add(var.set_mqtt_command_topic(command_topic))
+    if mqtt_config and mqtt_config[CONF_LISTEN_RESULTS]:
+        result_topic = f"{mqtt_config[CONF_RESULT_PREFIX]}/{config[CONF_DEVICE_ID]}"
+        if len(result_topic.encode("utf-8")) > 192:
+            raise cv.Invalid("composed MQTT result topic exceeds 192 bytes")
+        cg.add(var.set_mqtt_result_topic(result_topic))
+    if mqtt_config and CONF_OBSERVE_OUTGOING_TARGET in mqtt_config:
+        target = mqtt_config[CONF_OBSERVE_OUTGOING_TARGET]
+        command_topic = f"{mqtt_config[CONF_COMMAND_PREFIX]}/{target}/command"
+        if len(command_topic.encode("utf-8")) > 192:
+            raise cv.Invalid("composed MQTT outgoing command topic exceeds 192 bytes")
+        cg.add(var.set_mqtt_outgoing_topic(command_topic))
+        cg.add(var.set_mqtt_outgoing_target(target))

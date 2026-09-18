@@ -29,9 +29,17 @@ external_components:
 communication_net_protocol:
   id: command_network
   device_id: communication-foundation
+  inbound:
+    bindings:
+      - id: diagnostic_toggle
+        resource: light/example
+        command: toggle
+        then:
+          - logger.log: "Declared action only; no inbound dispatch is enabled"
   mqtt:
     mqtt_id: device_mqtt
     listen_commands: true  # Isolated receive-only probe; does not execute actions.
+    listen_results: true   # Observes results on this bench device ID only.
     command_prefix: tx/commands
     result_prefix: tx/results
     session_prefix: tx/sessions

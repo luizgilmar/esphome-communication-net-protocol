@@ -155,13 +155,39 @@ and source boot ID in a fixed-capacity table. It can retain one coalesced
 duplicate terminals and replies from a stale session. Its deadline applies to
 the complete application operation: a failed MQTT or ESP-NOW *attempt* is not
 itself a terminal application failure if the policy has another viable route.
-This header has no MQTT/ESP-NOW includes and no dynamic allocation. Parsing
-Wiring MQTT results to the tracker at runtime, integrating the ESP-NOW observer, and
-cross-transport receiver deduplication are **future gates**: do not connect a
+This header has no MQTT/ESP-NOW includes and no dynamic allocation. Integrating
+the ESP-NOW observer and activating cross-transport receiver deduplication are
+**future gates**: do not connect a
 HUB action yet. The tracker is testable on a host with
 `tests/transaction_tracker_test.cpp`.
 
-### Result correlation helper (not subscribed at runtime)
+### Optional MQTT result observation
+
+`mqtt.listen_results: true` subscribes to
+`<result_prefix>/<device_id>` with the same bounded, non-retained MQTT mailbox
+used by command observation. Both options default to `false`. The composed
+topic is limited to 192 UTF-8 bytes and the receive payload to 1280 bytes;
+oversized messages are dropped before parsing. The loop verifies the exact
+topic, decodes the result and logs its ID, stage and tracker correlation.
+Unknown IDs remain `UNKNOWN_TRANSACTION`: the isolated bench does not start
+outbound transactions. Only a separately registered outstanding transaction
+can accept a response, using its locally retained boot ID. This observation
+does not authenticate a broker publisher, execute commands, publish replies or
+alter the TX/HUB route. Do not use it as proof of effect confirmation.
+
+With `listen_results: true`, the optional `observe_outgoing_target` subscribes
+to `<command_prefix>/<target>/command`. It registers only envelopes whose
+`source.device_id` equals the configured local device ID, whose target equals
+the configured target, and whose `reply_to` equals the observed result topic.
+It tracks the envelope transaction and boot IDs for at most 30 seconds and
+four concurrent requests. This is passive MQTT observation, not publisher
+authentication: a broker client can spoof these envelope fields. A result
+can now log `ACCEPTED` for a tracked command, while the legacy TX executor
+still owns the action and UX. The decoder accepts `command.payload: {}` and
+a positive `timeout_ms` as emitted by the TX. Nonempty command arguments
+remain rejected until they have a canonical encoding.
+
+### Result correlation helper
 
 `mqtt_result_decoder.h` recognizes the existing HUB result envelope, including
 `in_progress`, terminal success/rejection/failure and `failed` with error code
@@ -170,8 +196,8 @@ an application stage. The helper accepts the source boot ID from the local
 outstanding request, never from result JSON; `TransactionTracker` rejects an
 unknown transaction or a mismatch. It cannot prove publisher identity or the
 effect of an action. The caller must verify the MQTT reply topic and broker
-trust policy before invoking it. No result topic is subscribed here and no
-existing TX/HUB runtime is changed. Host test:
+trust policy before invoking it. The optional isolated result observer uses
+the configured topic; no existing TX/HUB runtime is changed. Host test:
 `tests/mqtt_result_decoder_test.cpp`. Application result subscription,
 publisher/session validation and dispatch remain separate migration gates.
 
@@ -200,6 +226,41 @@ fallback of non-idempotent commands. Host tests:
 
 ## Transport-neutral inbound admission (still no live routing)
 
+### Declarative route names (compile-only)
+
+The optional `inbound.bindings` list declares up to 16 unique `id`, `resource`
+and `command` triples. The registry resolves a resource/command pair to its
+configured binding ID without hard-coded device resources. Duplicate IDs or
+pairs fail YAML validation; the C++ registry also rejects them and enforces
+its bounded capacity. The current foundation bench declares `light/example`
+only to compile this contract. Declaring a binding does **not** subscribe to
+commands, invoke an ESPHome action, admit a transaction or take an existing
+HUB/ESP-NOW binding. The same device-wide inbound gate must mediate both
+transport adapters before any configured action is enabled. On the sender,
+the intended production route order is MQTT then ESP-NOW; non-idempotent
+actions require shared receiver deduplication before that fallback is live.
+
+`RouteAdmission` now composes the declaration registry and the existing
+device-wide replay gate. For a verified inbound command, it checks the local
+device and declared resource/action before admitting the transaction; only
+`NEW_COMMAND` returns a binding ID to an eventual executor. A duplicate
+pending command stays pending; a duplicate terminal command may retrieve the
+stored application outcome without re-execution. The two adapters must supply
+the same authenticated source ID, application boot ID, transaction ID and
+normalized command bytes. The separate ESP-NOW radio boot ID is not an
+application boot ID. This code is compiled when `inbound` is declared, but no
+transport calls it at runtime yet.
+
+The declared binding now accepts a standard ESPHome `then` action list and an
+optional `completion` block (`light_id`, `expected: on|off|toggled`, `timeout`).
+ESPHome compiles the automation and resolves the light reference, with no
+lambda needed in YAML. These are retained as configuration on a dormant
+trigger. No inbound transport invokes the trigger yet, so neither the action
+nor the completion runs in the current foundation bench. The completion
+declaration currently supports lights; additional resource types need their
+own typed completion adapters without changing the route/admission core.
+
+
 `InboundCommandGate` combines the canonical encoder and replay guard behind
 one `InboundCommandView` with source ID, source boot ID, transaction ID and
 application intent. MQTT can supply the boot ID from its `source` envelope;
@@ -220,3 +281,17 @@ outcome may call `complete`; an ACK or publish success cannot. Duplicate
 pending commands remain pending, and a conflicting command identity cannot
 retrieve another command's result. This is volatile and does not make
 fallback safe across receiver reboot or stale sender session.
+# Passive ESP-NOW route inspection
+
+When `esp_now.observe_inbound: true` and `inbound.bindings` are declared, the
+component accepts only commands whose application source matches the
+configured encrypted radio peer. It checks the declared local device,
+resource, action and empty JSON payload, then logs the route and length of
+its canonical command. Existing ESP-NOW bindings remain responsible for
+execution. No replay entries are reserved and no result is published in this
+mode. Nonempty arguments require a normalized payload codec in a later step.
+
+The passive build includes its bounded route table but omits the replay
+table. The replay table must be enabled together with an executor that marks
+the terminal outcome; admitting observational traffic would otherwise fill
+the table and deny subsequent commands.
