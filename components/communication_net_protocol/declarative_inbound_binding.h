@@ -31,6 +31,8 @@ class DeclarativeInboundBinding : public Trigger<> {
       toggle_references_[toggle_reference_count_++] = state;
   }
   void set_expected(LightExpectedState expected) { expected_ = expected; }
+  void set_result_rgb(bool enabled) { result_rgb_ = enabled; }
+  bool result_rgb() const { return result_rgb_; }
   void set_expected_rgb(uint8_t red, uint8_t green, uint8_t blue) {
     expected_rgb_[0] = red;
     expected_rgb_[1] = green;
@@ -92,6 +94,7 @@ class DeclarativeInboundBinding : public Trigger<> {
   light::LightState *toggle_references_[3]{};
   size_t toggle_reference_count_{0};
   LightExpectedState expected_{LightExpectedState::TOGGLED};
+  bool result_rgb_{false};
   uint8_t expected_rgb_[3]{};
   bool check_rgb_{false};
   light::LightState *rgb_lights_[3]{};

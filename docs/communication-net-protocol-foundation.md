@@ -353,3 +353,16 @@ effect name and `completion.effect_light_ids` to the local lights that must
 report that effect. The two effect fields must be present together. The
 executor confirms the ON state of the primary and additional lights and
 checks the active effect on every listed light before returning success.
+# Resultado de luz RGB por ESP-NOW
+
+Uma rota de luz pode declarar `completion.result_rgb: true`. Depois da
+confirmação, o resultado transporta `rgb-state/v1` com cinco bytes, nesta
+ordem: estado ligado (0 ou 1), vermelho, verde, azul e brilho (0–255), lidos
+de `completion.light_id`. Sem essa opção, a resposta mantém
+`binary-state/v1` e um byte de estado. O resultado MQTT da mesma rota inclui
+`on`, `red`, `green`, `blue` e `brightness` em `remote_state.value`.
+
+No TX, um campo `state_observation.fields` associado por `result_resource` e
+com `rendering: rgb` aplica a cor recebida após a conclusão correlacionada.
+`white_as_binary: true` conserva a indicação binária para branco puro. Um
+resultado binário continua válido para o mesmo campo.

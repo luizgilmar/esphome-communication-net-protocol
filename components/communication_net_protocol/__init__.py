@@ -39,6 +39,7 @@ CONF_EXPECTED = "expected"
 CONF_ADDITIONAL_LIGHT_IDS = "additional_light_ids"
 CONF_TOGGLE_REFERENCE_LIGHT_IDS = "toggle_reference_light_ids"
 CONF_RGB_LIGHT_IDS = "rgb_light_ids"
+CONF_RESULT_RGB = "result_rgb"
 CONF_RGB = "rgb"
 CONF_BRIGHTNESS = "brightness"
 CONF_BRIGHTNESS_LIGHT_IDS = "brightness_light_ids"
@@ -185,6 +186,7 @@ LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     cv.Optional(CONF_RGB_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
+    cv.Optional(CONF_RESULT_RGB, default=False): cv.boolean,
     cv.Optional(CONF_BRIGHTNESS): cv.int_range(min=1, max=100),
     cv.Optional(CONF_BRIGHTNESS_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
@@ -371,6 +373,7 @@ async def to_code(config):
                 cg.add(trigger.add_toggle_reference_light(
                     await cg.get_variable(reference_id)))
             cg.add(trigger.set_expected(completion[CONF_EXPECTED]))
+            cg.add(trigger.set_result_rgb(completion[CONF_RESULT_RGB]))
             if CONF_RGB in completion:
                 rgb = completion[CONF_RGB]
                 cg.add(trigger.set_expected_rgb(rgb["red"], rgb["green"], rgb["blue"]))

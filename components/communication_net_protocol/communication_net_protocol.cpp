@@ -200,9 +200,20 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
     result.status = NetStatus::SUCCEEDED;
     result.remote_state.completeness =
         espnow_net_protocol::NetStateCompleteness::COMPLETE;
-    const uint8_t state = this->inbound_expected_on_ ? 1 : 0;
-    result.remote_state.schema.assign("binary-state/v1");
-    result.remote_state.data.assign(&state, 1);
+    const uint8_t state = this->active_binding_->light()->current_values.is_on() ? 1 : 0;
+    if (this->active_binding_->result_rgb()) {
+      const auto &values = this->active_binding_->light()->current_values;
+      const uint8_t rgb[5]{state,
+                           static_cast<uint8_t>(values.get_red() * 255.0f + 0.5f),
+                           static_cast<uint8_t>(values.get_green() * 255.0f + 0.5f),
+                           static_cast<uint8_t>(values.get_blue() * 255.0f + 0.5f),
+                           static_cast<uint8_t>(values.get_brightness() * 255.0f + 0.5f)};
+      result.remote_state.schema.assign("rgb-state/v1");
+      result.remote_state.data.assign(rgb, sizeof(rgb));
+    } else {
+      result.remote_state.schema.assign("binary-state/v1");
+      result.remote_state.data.assign(&state, 1);
+    }
   } else {
     result.status = NetStatus::FAILED;
     result.error.code = espnow_net_protocol::NetErrorCode::TIMED_OUT;
@@ -310,14 +321,26 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
                          static_cast<unsigned long long>(result.transaction_id),
                          static_cast<unsigned>(result.execution.estimated_completion_ms));
   } else if (result.status == NetStatus::SUCCEEDED) {
-    const bool on = result.remote_state.data.size() == 1 &&
-                    result.remote_state.data.data()[0] == 1;
-    size = std::snprintf(payload, sizeof(payload),
-                         "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
-                         "\"execution\":{\"started\":true},\"remote_state\":{"
-                         "\"complete\":true,\"value\":{\"on\":%s}}}",
-                         static_cast<unsigned long long>(result.transaction_id),
-                         on ? "true" : "false");
+    const auto &remote = result.remote_state;
+    const bool on = remote.data.size() >= 1 && remote.data.data()[0] == 1;
+    if (std::strcmp(remote.schema.c_str(), "rgb-state/v1") == 0 &&
+        remote.data.size() == 5) {
+      const uint8_t *rgb = remote.data.data();
+      size = std::snprintf(payload, sizeof(payload),
+                           "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
+                           "\"execution\":{\"started\":true},\"remote_state\":{"
+                           "\"complete\":true,\"value\":{\"on\":%s,\"red\":%u,"
+                           "\"green\":%u,\"blue\":%u,\"brightness\":%u}}}",
+                           static_cast<unsigned long long>(result.transaction_id),
+                           on ? "true" : "false", rgb[1], rgb[2], rgb[3], rgb[4]);
+    } else {
+      size = std::snprintf(payload, sizeof(payload),
+                           "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
+                           "\"execution\":{\"started\":true},\"remote_state\":{"
+                           "\"complete\":true,\"value\":{\"on\":%s}}}",
+                           static_cast<unsigned long long>(result.transaction_id),
+                           on ? "true" : "false");
+    }
   } else {
     size = std::snprintf(payload, sizeof(payload),
                          "{\"transaction_id\":\"%llu\",\"result\":\"%s\","
