@@ -72,6 +72,7 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
     bool known = true;
     bool on = false;
     uint8_t red = 0, green = 0, blue = 0, brightness = 0;
+    bool effect_active = false;
     if (field.sensor != nullptr) {
       known = field.sensor->has_state();
       on = known && field.sensor->state;
@@ -85,6 +86,8 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
       }
       if (field.rgb && selected != nullptr) {
         const auto &values = selected->current_values;
+        const auto &effect = selected->get_effect_name();
+        effect_active = on && !effect.empty() && effect != "None";
         red = static_cast<uint8_t>(values.get_red() * 255.0f);
         green = static_cast<uint8_t>(values.get_green() * 255.0f);
         blue = static_cast<uint8_t>(values.get_blue() * 255.0f);
@@ -93,9 +96,10 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
     }
     const int written = field.rgb
         ? std::snprintf(payload + used, sizeof(payload) - used,
-                        "%s\"%s\":{\"known\":%s,\"on\":%s,\"red\":%u,\"green\":%u,\"blue\":%u,\"brightness\":%u}",
+                        "%s\"%s\":{\"known\":%s,\"on\":%s,\"red\":%u,\"green\":%u,\"blue\":%u,\"brightness\":%u,\"effect_active\":%s}",
                         i ? "," : "", field.name, known ? "true" : "false",
-                        on ? "true" : "false", red, green, blue, brightness)
+                        on ? "true" : "false", red, green, blue, brightness,
+                        effect_active ? "true" : "false")
         : std::snprintf(payload + used, sizeof(payload) - used,
                         "%s\"%s\":{\"known\":%s,\"on\":%s}",
                         i ? "," : "", field.name, known ? "true" : "false",

@@ -353,6 +353,7 @@ effect name and `completion.effect_light_ids` to the local lights that must
 report that effect. The two effect fields must be present together. The
 executor confirms the ON state of the primary and additional lights and
 checks the active effect on every listed light before returning success.
+
 # Resultado de luz RGB por ESP-NOW
 
 Uma rota de luz pode declarar `completion.result_rgb: true`. Depois da
@@ -366,3 +367,8 @@ No TX, um campo `state_observation.fields` associado por `result_resource` e
 com `rendering: rgb` aplica a cor recebida após a conclusão correlacionada.
 `white_as_binary: true` conserva a indicação binária para branco puro. Um
 resultado binário continua válido para o mesmo campo.
+
+Para efeitos animados, a rota pode manter `result_rgb: false`: o resultado
+indica ligado/desligado, pois uma amostra RGB não representa o efeito inteiro.
+O snapshot MQTT de um campo RGB publica também `effect_active`. Quando ele é
+verdadeiro, o TX mostra o estado ligado em vez da cor RGB momentânea.
