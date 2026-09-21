@@ -336,6 +336,9 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
 #endif
 
 void CommunicationNetProtocolComponent::loop() {
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+  this->state_snapshot_.loop(millis(), this->mqtt_wire_);
+#endif
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   this->loop(millis());
   this->publish_inbound_result_();

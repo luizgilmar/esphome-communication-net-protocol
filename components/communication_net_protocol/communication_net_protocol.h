@@ -20,6 +20,9 @@
 #include "mqtt_wire_transport.h"
 #include "mqtt_mailbox.h"
 #endif
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+#include "light_state_snapshot.h"
+#endif
 
 namespace esphome {
 namespace communication_net_protocol {
@@ -69,6 +72,20 @@ class CommunicationNetProtocolComponent : public Component
   void setup() override {}
   void loop() override;
   void dump_config() override;
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+  bool configure_state_snapshot(const char *topic, uint8_t qos, uint32_t interval_ms) {
+    return state_snapshot_.configure(topic, qos, interval_ms);
+  }
+  bool add_snapshot_light_field(const char *field, bool rgb) {
+    return state_snapshot_.add_light_field(field, rgb);
+  }
+  bool add_snapshot_light(light::LightState *state) {
+    return state_snapshot_.add_light(state);
+  }
+  bool add_snapshot_binary_field(const char *field, binary_sensor::BinarySensor *sensor) {
+    return state_snapshot_.add_binary_field(field, sensor);
+  }
+#endif
 
   TransactionTracker<4> &transactions() { return this->transactions_; }
 #ifdef USE_COMMUNICATION_NET_INBOUND
@@ -136,6 +153,9 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 #ifdef USE_MQTT
   MqttWireTransport mqtt_wire_{};
+#endif
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+  LightStateSnapshot state_snapshot_{};
 #endif
 #if defined(USE_MQTT) && defined(USE_COMMUNICATION_NET_MQTT_LISTENER)
   const char *mqtt_command_topic_{nullptr};

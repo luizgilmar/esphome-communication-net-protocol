@@ -3,7 +3,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import light
+from esphome.components import binary_sensor, light
 from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
@@ -44,6 +44,14 @@ CONF_BRIGHTNESS = "brightness"
 CONF_BRIGHTNESS_LIGHT_IDS = "brightness_light_ids"
 CONF_EFFECT = "effect"
 CONF_EFFECT_LIGHT_IDS = "effect_light_ids"
+CONF_STATE_SNAPSHOT = "state_snapshot"
+CONF_TOPIC = "topic"
+CONF_QOS = "qos"
+CONF_INTERVAL = "interval"
+CONF_FIELDS = "fields"
+CONF_FIELD = "field"
+CONF_LIGHT_IDS = "light_ids"
+CONF_BINARY_SENSOR_ID = "binary_sensor_id"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -202,6 +210,43 @@ INBOUND_SCHEMA = cv.Schema({
 })
 
 
+def _validate_snapshot_field(config):
+    if (CONF_LIGHT_IDS in config) == (CONF_BINARY_SENSOR_ID in config):
+        raise cv.Invalid("snapshot field requires either light_ids or binary_sensor_id")
+    if config.get(CONF_RGB, False) and CONF_LIGHT_IDS not in config:
+        raise cv.Invalid("rgb snapshot requires light_ids")
+    return config
+
+
+def _snapshot_field_name(value):
+    value = cv.string_strict(value)
+    if (not value or len(value) > 31 or not value[0].isascii() or
+            not value[0].islower() or
+            any(not (char.isascii() and (char.islower() or char.isdigit() or
+                                        char == "_")) for char in value)):
+        raise cv.Invalid("snapshot field must be lowercase ASCII letters, digits or underscores")
+    return value
+
+
+SNAPSHOT_FIELD_SCHEMA = cv.All(cv.Schema({
+    cv.Required(CONF_FIELD): _snapshot_field_name,
+    cv.Optional(CONF_LIGHT_IDS): cv.All(
+        cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
+    ),
+    cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor),
+    cv.Optional(CONF_RGB, default=False): cv.boolean,
+}), _validate_snapshot_field)
+
+STATE_SNAPSHOT_SCHEMA = cv.Schema({
+    cv.Required(CONF_TOPIC): _prefix,
+    cv.Optional(CONF_QOS, default=1): cv.int_range(min=0, max=2),
+    cv.Optional(CONF_INTERVAL, default="500ms"): cv.positive_time_period_milliseconds,
+    cv.Required(CONF_FIELDS): cv.All(
+        cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=4)
+    ),
+})
+
+
 def _validate(config):
     esp_now = config.get(CONF_ESP_NOW)
     mqtt = config.get(CONF_MQTT)
@@ -222,6 +267,12 @@ def _validate(config):
         raise cv.Invalid("esp_now.observe_inbound requires inbound.bindings")
     if mqtt and CONF_OBSERVE_OUTGOING_TARGET in mqtt and not mqtt[CONF_LISTEN_RESULTS]:
         raise cv.Invalid("observe_outgoing_target requires listen_results: true")
+    if CONF_STATE_SNAPSHOT in config:
+        if mqtt is None:
+            raise cv.Invalid("state_snapshot requires mqtt")
+        fields = [field[CONF_FIELD] for field in config[CONF_STATE_SNAPSHOT][CONF_FIELDS]]
+        if len(set(fields)) != len(fields):
+            raise cv.Invalid("state_snapshot fields must be unique")
     if CONF_INBOUND in config:
         names, routes = set(), set()
         for binding in config[CONF_INBOUND][CONF_BINDINGS]:
@@ -267,6 +318,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_MQTT): MQTT_SCHEMA,
         cv.Optional(CONF_ESP_NOW): ESPNOW_SCHEMA,
         cv.Optional(CONF_INBOUND): INBOUND_SCHEMA,
+        cv.Optional(CONF_STATE_SNAPSHOT): STATE_SNAPSHOT_SCHEMA,
         cv.Required(CONF_POLICIES): cv.All(
             cv.ensure_list(POLICY_SCHEMA), cv.Length(min=1, max=16)
         ),
@@ -281,6 +333,8 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     esp_now = config.get(CONF_ESP_NOW)
     mqtt_config = config.get(CONF_MQTT)
+    if CONF_STATE_SNAPSHOT in config:
+        cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT")
     if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):
         cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
     if CONF_INBOUND in config:
@@ -290,6 +344,18 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
+    if CONF_STATE_SNAPSHOT in config:
+        snapshot = config[CONF_STATE_SNAPSHOT]
+        cg.add(var.configure_state_snapshot(snapshot[CONF_TOPIC], snapshot[CONF_QOS],
+                                            snapshot[CONF_INTERVAL].total_milliseconds))
+        for field in snapshot[CONF_FIELDS]:
+            if CONF_BINARY_SENSOR_ID in field:
+                sensor = await cg.get_variable(field[CONF_BINARY_SENSOR_ID])
+                cg.add(var.add_snapshot_binary_field(field[CONF_FIELD], sensor))
+            else:
+                cg.add(var.add_snapshot_light_field(field[CONF_FIELD], field[CONF_RGB]))
+                for light_id in field[CONF_LIGHT_IDS]:
+                    cg.add(var.add_snapshot_light(await cg.get_variable(light_id)))
     for binding in config.get(CONF_INBOUND, {}).get(CONF_BINDINGS, []):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))
