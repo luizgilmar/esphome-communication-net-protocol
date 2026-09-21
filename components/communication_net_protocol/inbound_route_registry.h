@@ -11,7 +11,7 @@ namespace communication_net_protocol {
 // inbound message; the shared admission gate must run before dispatch.
 template<size_t Capacity = 16> class InboundRouteRegistry {
  public:
-  static_assert(Capacity > 0 && Capacity <= 20, "bounded route capacity required");
+  static_assert(Capacity > 0 && Capacity <= 32, "bounded route capacity required");
 
   bool add(const char *id, const char *resource, const char *command) {
     const size_t id_size = length_(id, 31);

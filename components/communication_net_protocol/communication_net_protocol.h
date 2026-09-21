@@ -3,6 +3,9 @@
 #include "esphome/core/component.h"
 #include "transaction_tracker.h"
 #ifdef USE_COMMUNICATION_NET_INBOUND
+#ifndef COMMUNICATION_NET_INBOUND_CAPACITY
+#define COMMUNICATION_NET_INBOUND_CAPACITY 16
+#endif
 #include "inbound_route_registry.h"
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
 #include "route_admission.h"
@@ -95,7 +98,7 @@ class CommunicationNetProtocolComponent : public Component
         this->inbound_routes_.add(id, resource, command);
   }
   void add_inbound_binding(DeclarativeInboundBinding *binding) {
-    if (binding == nullptr || inbound_binding_count_ >= 20) {
+    if (binding == nullptr || inbound_binding_count_ >= COMMUNICATION_NET_INBOUND_CAPACITY) {
       inbound_routes_valid_ = false;
       return;
     }
@@ -122,10 +125,10 @@ class CommunicationNetProtocolComponent : public Component
   const char *device_id_{nullptr};
   TransactionTracker<4> transactions_{};
 #ifdef USE_COMMUNICATION_NET_INBOUND
-  InboundRouteRegistry<20> inbound_routes_{};
+  InboundRouteRegistry<COMMUNICATION_NET_INBOUND_CAPACITY> inbound_routes_{};
   bool inbound_routes_valid_{true};
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
-  RouteAdmission<8, 20> route_admission_{nullptr, inbound_routes_};
+  RouteAdmission<8, COMMUNICATION_NET_INBOUND_CAPACITY> route_admission_{nullptr, inbound_routes_};
   const espnow_net_protocol::NetCommand *verified_command_{nullptr};
   espnow_net_protocol::NetCommand active_command_{};
   espnow_net_protocol::NetResult inbound_result_{};
@@ -148,7 +151,7 @@ class CommunicationNetProtocolComponent : public Component
   void receive_mqtt_inbound_(const uint8_t *payload, size_t length);
   void publish_inbound_result_();
 #endif
-  DeclarativeInboundBinding *inbound_bindings_[20]{};
+  DeclarativeInboundBinding *inbound_bindings_[COMMUNICATION_NET_INBOUND_CAPACITY]{};
   size_t inbound_binding_count_{0};
 #endif
 #ifdef USE_MQTT

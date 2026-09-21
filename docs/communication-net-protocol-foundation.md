@@ -344,9 +344,10 @@ the lights whose brightness must match. Both brightness fields must be
 specified together. The executor compares the current brightness of every
 listed light to the configured percentage, allowing one 8-bit step of
 rounding, and also checks the ON state of the primary and additional lights.
-The bounded inbound route table supports 20 routes; only declared bindings
-occupy entries, and increasing the table from 16 to 20 adds 640 bytes of
-fixed route storage plus four binding pointers on 32-bit targets.
+The bounded inbound route table supports up to 32 routes; its compile-time
+capacity is set to the number of declared YAML bindings. Each additional route
+occupies 160 bytes of fixed route storage plus one binding pointer on 32-bit
+targets.
 
 For light effects, set `expected: on`, `completion.effect` to the exact
 effect name and `completion.effect_light_ids` to the local lights that must
@@ -367,6 +368,14 @@ No TX, um campo `state_observation.fields` associado por `result_resource` e
 com `rendering: rgb` aplica a cor recebida após a conclusão correlacionada.
 `white_as_binary: true` conserva a indicação binária para branco puro. Um
 resultado binário continua válido para o mesmo campo.
+
+## Conclusão por sensor binário
+
+Uma rota pode declarar `completion.binary_sensor_id` no lugar de
+`completion.light_id`, com `expected: on`, `off` ou `toggled`. O estado deve
+estar conhecido antes da execução de `then`; sem ele, a rota falha com
+`target_unavailable` e a ação não é chamada. A conclusão só ocorre quando o
+sensor passa ao estado esperado. O resultado usa `binary-state/v1`.
 
 Para efeitos animados, a rota pode manter `result_rgb: false`: o resultado
 indica ligado/desligado, pois uma amostra RGB não representa o efeito inteiro.

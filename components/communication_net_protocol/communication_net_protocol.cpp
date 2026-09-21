@@ -8,6 +8,7 @@
 #include <cstdio>
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
 #include "esphome/components/light/light_state.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
 
 namespace esphome {
@@ -133,9 +134,23 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
     this->inbound_expected_on_ =
         binding->expected() == LightExpectedState::ON ||
         (binding->expected() == LightExpectedState::TOGGLED && !on);
+  } else if (binding->binary_sensor() != nullptr) {
+    auto *sensor = binding->binary_sensor();
+    if (!sensor->has_state()) {
+      NetResult unavailable{};
+      unavailable.transaction_id = command.transaction_id;
+      unavailable.status = NetStatus::FAILED;
+      unavailable.error.code = espnow_net_protocol::NetErrorCode::TARGET_UNAVAILABLE;
+      unavailable.error.message.assign("binary sensor state unavailable");
+      this->finish_inbound_(unavailable);
+      return NetStart::STARTED;
+    }
+    this->inbound_expected_on_ =
+        binding->expected() == LightExpectedState::ON ||
+        (binding->expected() == LightExpectedState::TOGGLED && !sensor->state);
   }
   binding->trigger();
-  if (binding->light() == nullptr) {
+  if (binding->light() == nullptr && binding->binary_sensor() == nullptr) {
     NetResult immediate{};
     immediate.transaction_id = command.transaction_id;
     immediate.status = NetStatus::SUCCEEDED;
@@ -158,8 +173,12 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
 void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
   if (!this->inbound_active_ || this->radio_result_ready_ ||
       this->mqtt_result_ready_ || this->active_binding_ == nullptr ||
-      this->active_binding_->light() == nullptr) return;
-  bool completed = true;
+      (this->active_binding_->light() == nullptr &&
+       this->active_binding_->binary_sensor() == nullptr)) return;
+  bool completed = this->active_binding_->binary_sensor() == nullptr ||
+                   (this->active_binding_->binary_sensor()->has_state() &&
+                    this->active_binding_->binary_sensor()->state ==
+                        this->inbound_expected_on_);
   for (size_t i = 0; i < this->active_binding_->light_count(); ++i)
     completed &= this->active_binding_->light_at(i)->current_values.is_on() ==
                  this->inbound_expected_on_;
@@ -200,7 +219,9 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
     result.status = NetStatus::SUCCEEDED;
     result.remote_state.completeness =
         espnow_net_protocol::NetStateCompleteness::COMPLETE;
-    const uint8_t state = this->active_binding_->light()->current_values.is_on() ? 1 : 0;
+    const uint8_t state = this->active_binding_->binary_sensor() != nullptr
+                              ? (this->active_binding_->binary_sensor()->state ? 1 : 0)
+                              : (this->active_binding_->light()->current_values.is_on() ? 1 : 0);
     if (this->active_binding_->result_rgb()) {
       const auto &values = this->active_binding_->light()->current_values;
       const uint8_t rgb[5]{state,
@@ -342,11 +363,15 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
                            on ? "true" : "false");
     }
   } else {
+    const char *error = result.error.code ==
+                                espnow_net_protocol::NetErrorCode::TARGET_UNAVAILABLE
+                            ? "target_unavailable" : "timed_out";
     size = std::snprintf(payload, sizeof(payload),
                          "{\"transaction_id\":\"%llu\",\"result\":\"%s\","
-                         "\"execution\":{\"started\":true},\"error\":{"
-                         "\"code\":\"timed_out\",\"retryable\":false}}",
-                         static_cast<unsigned long long>(result.transaction_id), status);
+                         "\"execution\":{\"started\":%s},\"error\":{"
+                         "\"code\":\"%s\",\"retryable\":false}}",
+                         static_cast<unsigned long long>(result.transaction_id), status,
+                         result.execution.started ? "true" : "false", error);
   }
   if (size > 0 && static_cast<size_t>(size) < sizeof(payload) &&
       this->mqtt_wire_.publish(this->mqtt_execution_reply_,
@@ -472,7 +497,11 @@ void CommunicationNetProtocolComponent::dump_config() {
 #endif
   ESP_LOGCONFIG(TAG, "  Device ID: %s", this->device_id_ == nullptr ? "" : this->device_id_);
 #ifdef USE_COMMUNICATION_NET_INBOUND
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  ESP_LOGCONFIG(TAG, "  Inbound route declarations: %u (executor enabled)",
+#else
   ESP_LOGCONFIG(TAG, "  Inbound route declarations: %u (dispatch disabled)",
+#endif
                 static_cast<unsigned>(this->inbound_routes_.size()));
   if (!this->inbound_routes_valid_)
     ESP_LOGE(TAG, "Inbound route registration failed");

@@ -149,6 +149,14 @@ DESTINATION_SCHEMA = cv.Schema({
 })
 
 def _validate_light_completion(config):
+    if (CONF_LIGHT_ID in config) == (CONF_BINARY_SENSOR_ID in config):
+        raise cv.Invalid("completion requires exactly one of light_id or binary_sensor_id")
+    if CONF_BINARY_SENSOR_ID in config and any(key in config for key in (
+        CONF_ADDITIONAL_LIGHT_IDS, CONF_TOGGLE_REFERENCE_LIGHT_IDS, CONF_RGB,
+        CONF_RGB_LIGHT_IDS, CONF_BRIGHTNESS, CONF_BRIGHTNESS_LIGHT_IDS,
+        CONF_EFFECT, CONF_EFFECT_LIGHT_IDS, CONF_RESULT_RGB,
+    )):
+        raise cv.Invalid("binary sensor completion cannot use light options")
     if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
     if (CONF_BRIGHTNESS in config) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
@@ -166,7 +174,8 @@ def _validate_light_completion(config):
 
 
 LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
-    cv.Required(CONF_LIGHT_ID): cv.use_id(light.LightState),
+    cv.Optional(CONF_LIGHT_ID): cv.use_id(light.LightState),
+    cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor),
     cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
@@ -207,7 +216,7 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
 
 INBOUND_SCHEMA = cv.Schema({
     cv.Required(CONF_BINDINGS): cv.All(
-        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=20)
+        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=32)
     ),
 })
 
@@ -341,6 +350,8 @@ async def to_code(config):
         cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
     if CONF_INBOUND in config:
         cg.add_define("USE_COMMUNICATION_NET_INBOUND")
+        cg.add_define("COMMUNICATION_NET_INBOUND_CAPACITY",
+                      len(config[CONF_INBOUND][CONF_BINDINGS]))
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         cg.add_define("USE_COMMUNICATION_NET_ESPNOW_OBSERVER")
     var = cg.new_Pvariable(config[CONF_ID])
@@ -365,8 +376,12 @@ async def to_code(config):
         cg.add(trigger.set_route_id(binding[CONF_ID]))
         if CONF_COMPLETION in binding:
             completion = binding[CONF_COMPLETION]
-            state = await cg.get_variable(completion[CONF_LIGHT_ID])
-            cg.add(trigger.set_light(state))
+            if CONF_BINARY_SENSOR_ID in completion:
+                sensor = await cg.get_variable(completion[CONF_BINARY_SENSOR_ID])
+                cg.add(trigger.set_binary_sensor(sensor))
+            else:
+                state = await cg.get_variable(completion[CONF_LIGHT_ID])
+                cg.add(trigger.set_light(state))
             for extra_id in completion.get(CONF_ADDITIONAL_LIGHT_IDS, []):
                 cg.add(trigger.add_completion_light(await cg.get_variable(extra_id)))
             for reference_id in completion.get(CONF_TOGGLE_REFERENCE_LIGHT_IDS, []):
