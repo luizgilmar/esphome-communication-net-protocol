@@ -42,6 +42,8 @@ CONF_RGB_LIGHT_IDS = "rgb_light_ids"
 CONF_RGB = "rgb"
 CONF_BRIGHTNESS = "brightness"
 CONF_BRIGHTNESS_LIGHT_IDS = "brightness_light_ids"
+CONF_EFFECT = "effect"
+CONF_EFFECT_LIGHT_IDS = "effect_light_ids"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -66,6 +68,13 @@ def _identifier(maximum, label):
         return value
 
     return validate
+
+
+def _effect_name(value):
+    value = cv.string_strict(value)
+    if not value or len(value) > 63 or "\x00" in value:
+        raise cv.Invalid("effect name must contain 1 to 63 characters")
+    return value
 
 
 def _prefix(value):
@@ -135,11 +144,15 @@ def _validate_light_completion(config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
     if (CONF_BRIGHTNESS in config) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
         raise cv.Invalid("brightness and brightness_light_ids must be configured together")
+    if (CONF_EFFECT in config) != (CONF_EFFECT_LIGHT_IDS in config):
+        raise cv.Invalid("effect and effect_light_ids must be configured together")
     # Run before cv.enum converts the YAML string to a C++ enum expression.
     if CONF_RGB in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("RGB completion requires expected: on")
     if CONF_BRIGHTNESS in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("brightness completion requires expected: on")
+    if CONF_EFFECT in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
+        raise cv.Invalid("effect completion requires expected: on")
     return config
 
 
@@ -166,6 +179,10 @@ LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     ),
     cv.Optional(CONF_BRIGHTNESS): cv.int_range(min=1, max=100),
     cv.Optional(CONF_BRIGHTNESS_LIGHT_IDS): cv.All(
+        cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
+    ),
+    cv.Optional(CONF_EFFECT): _effect_name,
+    cv.Optional(CONF_EFFECT_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
 }))
@@ -298,6 +315,11 @@ async def to_code(config):
                 for brightness_light_id in completion[CONF_BRIGHTNESS_LIGHT_IDS]:
                     cg.add(trigger.add_brightness_light(
                         await cg.get_variable(brightness_light_id)))
+            if CONF_EFFECT in completion:
+                cg.add(trigger.set_expected_effect(completion[CONF_EFFECT]))
+                for effect_light_id in completion[CONF_EFFECT_LIGHT_IDS]:
+                    cg.add(trigger.add_effect_light(
+                        await cg.get_variable(effect_light_id)))
             cg.add(trigger.set_completion_timeout(
                 completion[CONF_TIMEOUT].total_milliseconds))
         cg.add(var.add_inbound_binding(trigger))

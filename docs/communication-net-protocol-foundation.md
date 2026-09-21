@@ -347,3 +347,9 @@ rounding, and also checks the ON state of the primary and additional lights.
 The bounded inbound route table supports 20 routes; only declared bindings
 occupy entries, and increasing the table from 16 to 20 adds 640 bytes of
 fixed route storage plus four binding pointers on 32-bit targets.
+
+For light effects, set `expected: on`, `completion.effect` to the exact
+effect name and `completion.effect_light_ids` to the local lights that must
+report that effect. The two effect fields must be present together. The
+executor confirms the ON state of the primary and additional lights and
+checks the active effect on every listed light before returning success.

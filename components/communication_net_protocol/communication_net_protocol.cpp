@@ -183,6 +183,12 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
       completed &= actual >= expected - 1 && actual <= expected + 1;
     }
   }
+  if (completed && this->active_binding_->expected_effect() != nullptr) {
+    for (size_t i = 0; i < this->active_binding_->effect_light_count(); ++i)
+      completed &= std::strcmp(
+          this->active_binding_->effect_light_at(i)->get_effect_name().c_str(),
+          this->active_binding_->expected_effect()) == 0;
+  }
   const bool timed_out = now_ms - this->inbound_started_ms_ >=
                          this->inbound_timeout_ms_;
   if (!completed && !timed_out) return;
