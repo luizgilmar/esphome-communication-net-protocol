@@ -25,7 +25,12 @@ def test_foundation_does_not_unconditionally_subscribe_or_publish():
     assert "FOUNDATION ONLY" in source
     assert "USE_COMMUNICATION_NET_MQTT_LISTENER" in source
     assert "mqtt_wire_.subscribe" in source
-    assert ".publish(" not in source
+    gate = "#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE\nusing NetCommand"
+    start = source.index(gate)
+    end = source.index("\n#endif", start)
+    active_executor = source[start:end]
+    assert "this->mqtt_wire_.publish(this->mqtt_execution_reply_" in active_executor
+    assert ".publish(" not in source[:start] + source[end:]
 
 
 def test_mailbox_is_bounded_and_does_not_parse_in_callback():

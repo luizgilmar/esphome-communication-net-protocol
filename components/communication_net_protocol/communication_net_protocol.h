@@ -78,7 +78,7 @@ class CommunicationNetProtocolComponent : public Component
         this->inbound_routes_.add(id, resource, command);
   }
   void add_inbound_binding(DeclarativeInboundBinding *binding) {
-    if (binding == nullptr || inbound_binding_count_ >= 16) {
+    if (binding == nullptr || inbound_binding_count_ >= 20) {
       inbound_routes_valid_ = false;
       return;
     }
@@ -105,10 +105,10 @@ class CommunicationNetProtocolComponent : public Component
   const char *device_id_{nullptr};
   TransactionTracker<4> transactions_{};
 #ifdef USE_COMMUNICATION_NET_INBOUND
-  InboundRouteRegistry<16> inbound_routes_{};
+  InboundRouteRegistry<20> inbound_routes_{};
   bool inbound_routes_valid_{true};
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
-  RouteAdmission<8, 16> route_admission_{nullptr, inbound_routes_};
+  RouteAdmission<8, 20> route_admission_{nullptr, inbound_routes_};
   const espnow_net_protocol::NetCommand *verified_command_{nullptr};
   espnow_net_protocol::NetCommand active_command_{};
   espnow_net_protocol::NetResult inbound_result_{};
@@ -131,7 +131,7 @@ class CommunicationNetProtocolComponent : public Component
   void receive_mqtt_inbound_(const uint8_t *payload, size_t length);
   void publish_inbound_result_();
 #endif
-  DeclarativeInboundBinding *inbound_bindings_[16]{};
+  DeclarativeInboundBinding *inbound_bindings_[20]{};
   size_t inbound_binding_count_{0};
 #endif
 #ifdef USE_MQTT

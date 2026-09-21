@@ -175,6 +175,14 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
       }
     }
   }
+  if (completed && this->active_binding_->check_brightness()) {
+    const int expected = (this->active_binding_->expected_brightness() * 255 + 50) / 100;
+    for (size_t i = 0; i < this->active_binding_->brightness_light_count(); ++i) {
+      const auto &values = this->active_binding_->brightness_light_at(i)->current_values;
+      const int actual = static_cast<int>(values.get_brightness() * 255.0f + 0.5f);
+      completed &= actual >= expected - 1 && actual <= expected + 1;
+    }
+  }
   const bool timed_out = now_ms - this->inbound_started_ms_ >=
                          this->inbound_timeout_ms_;
   if (!completed && !timed_out) return;

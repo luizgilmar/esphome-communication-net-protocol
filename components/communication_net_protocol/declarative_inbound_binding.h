@@ -41,6 +41,14 @@ class DeclarativeInboundBinding : public Trigger<> {
     if (state != nullptr && rgb_light_count_ < 3)
       rgb_lights_[rgb_light_count_++] = state;
   }
+  void set_expected_brightness(uint8_t percent) {
+    expected_brightness_ = percent;
+    check_brightness_ = true;
+  }
+  void add_brightness_light(light::LightState *state) {
+    if (state != nullptr && brightness_light_count_ < 3)
+      brightness_lights_[brightness_light_count_++] = state;
+  }
   void set_completion_timeout(uint32_t timeout_ms) { timeout_ms_ = timeout_ms; }
 
   light::LightState *light() const { return lights_[0]; }
@@ -59,6 +67,12 @@ class DeclarativeInboundBinding : public Trigger<> {
   light::LightState *rgb_light_at(size_t index) const {
     return index < rgb_light_count_ ? rgb_lights_[index] : nullptr;
   }
+  bool check_brightness() const { return check_brightness_; }
+  uint8_t expected_brightness() const { return expected_brightness_; }
+  size_t brightness_light_count() const { return brightness_light_count_; }
+  light::LightState *brightness_light_at(size_t index) const {
+    return index < brightness_light_count_ ? brightness_lights_[index] : nullptr;
+  }
   uint32_t completion_timeout() const { return timeout_ms_; }
 
  private:
@@ -72,6 +86,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   bool check_rgb_{false};
   light::LightState *rgb_lights_[3]{};
   size_t rgb_light_count_{0};
+  uint8_t expected_brightness_{0};
+  bool check_brightness_{false};
+  light::LightState *brightness_lights_[3]{};
+  size_t brightness_light_count_{0};
   uint32_t timeout_ms_{2000};
 };
 

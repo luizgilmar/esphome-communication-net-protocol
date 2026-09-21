@@ -337,3 +337,13 @@ executor also checks the primary and additional lights are ON; supply lights
 can therefore be checked without requiring their color to match. Each RGB
 channel allows one byte of rounding difference. The route succeeds only after
 the declared RGB values appear on every RGB light, or fails on timeout.
+
+For brightness commands, set `expected: on`, `completion.brightness` as an
+integer percentage from 1 to 100, and `completion.brightness_light_ids` with
+the lights whose brightness must match. Both brightness fields must be
+specified together. The executor compares the current brightness of every
+listed light to the configured percentage, allowing one 8-bit step of
+rounding, and also checks the ON state of the primary and additional lights.
+The bounded inbound route table supports 20 routes; only declared bindings
+occupy entries, and increasing the table from 16 to 20 adds 640 bytes of
+fixed route storage plus four binding pointers on 32-bit targets.
