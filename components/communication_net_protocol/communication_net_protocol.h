@@ -61,11 +61,22 @@ class CommunicationNetProtocolComponent : public Component
       espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
     if (endpoint != nullptr) endpoint->set_command_handler(this);
   }
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  void activate_interruptible_inbound_executor(
+      espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
+    if (endpoint == nullptr) return;
+    endpoint->set_command_handler(this);
+    endpoint->set_interruptible_inbound(true);
+  }
+#endif
   espnow_net_protocol::NetCommandHandlerStartStatus start(
       const espnow_net_protocol::NetCommand &command, uint32_t now_ms) override;
   void loop(uint32_t now_ms) override;
   bool has_result() const override { return radio_result_ready_; }
   bool take_result(espnow_net_protocol::NetResult &result) override;
+  bool has_result(uint64_t transaction_id) const override;
+  bool take_result(uint64_t transaction_id,
+                   espnow_net_protocol::NetResult &result) override;
   bool cancel(uint64_t transaction_id) override;
   void set_mqtt_inbound_execution(const char *source, const char *reply_topic) {
     mqtt_execution_source_ = source;
@@ -144,10 +155,28 @@ class CommunicationNetProtocolComponent : public Component
   bool mqtt_waiting_{false};
   bool radio_result_ready_{false};
   bool mqtt_result_ready_{false};
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  espnow_net_protocol::NetCommand interrupt_command_{};
+  espnow_net_protocol::NetResult interrupt_result_{};
+  DeclarativeInboundBinding *interrupt_binding_{nullptr};
+  uint32_t interrupt_started_ms_{0};
+  uint32_t interrupt_timeout_ms_{0};
+  bool interrupt_expected_on_{false};
+  bool interrupt_active_{false};
+  bool interrupt_radio_waiting_{false};
+  bool interrupt_mqtt_waiting_{false};
+  bool interrupt_radio_result_ready_{false};
+  bool interrupt_mqtt_result_ready_{false};
+#endif
   espnow_net_protocol::NetCommandHandlerStartStatus start_inbound_(
       const espnow_net_protocol::NetCommand &command, uint32_t now_ms,
       bool radio);
   void finish_inbound_(espnow_net_protocol::NetResult result);
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  void finish_interrupt_(espnow_net_protocol::NetResult result);
+  bool command_matches_active_resource_(
+      const espnow_net_protocol::NetCommand &command) const;
+#endif
   void receive_mqtt_inbound_(const uint8_t *payload, size_t length);
   void publish_inbound_result_();
 #endif

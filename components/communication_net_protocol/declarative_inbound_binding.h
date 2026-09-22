@@ -62,6 +62,12 @@ class DeclarativeInboundBinding : public Trigger<> {
       effect_lights_[effect_light_count_++] = state;
   }
   void set_completion_timeout(uint32_t timeout_ms) { timeout_ms_ = timeout_ms; }
+  void set_completion_delay(uint32_t delay_ms) {
+    completion_delay_ms_ = delay_ms;
+    timer_completion_ = true;
+  }
+  void set_interruptible(bool enabled) { interruptible_ = enabled; }
+  void set_interrupts_active(bool enabled) { interrupts_active_ = enabled; }
 
   light::LightState *light() const { return lights_[0]; }
   size_t light_count() const { return light_count_; }
@@ -91,6 +97,10 @@ class DeclarativeInboundBinding : public Trigger<> {
     return index < effect_light_count_ ? effect_lights_[index] : nullptr;
   }
   uint32_t completion_timeout() const { return timeout_ms_; }
+  bool timer_completion() const { return timer_completion_; }
+  uint32_t completion_delay() const { return completion_delay_ms_; }
+  bool interruptible() const { return interruptible_; }
+  bool interrupts_active() const { return interrupts_active_; }
 
  private:
   const char *route_id_{nullptr};
@@ -113,6 +123,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   light::LightState *effect_lights_[3]{};
   size_t effect_light_count_{0};
   uint32_t timeout_ms_{2000};
+  uint32_t completion_delay_ms_{0};
+  bool timer_completion_{false};
+  bool interruptible_{false};
+  bool interrupts_active_{false};
 };
 
 }  // namespace communication_net_protocol

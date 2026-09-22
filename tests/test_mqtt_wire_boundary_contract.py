@@ -27,7 +27,10 @@ def test_foundation_does_not_unconditionally_subscribe_or_publish():
     assert "mqtt_wire_.subscribe" in source
     gate = "#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE\nusing NetCommand"
     start = source.index(gate)
-    end = source.index("\n#endif", start)
+    # The active executor contains optional nested feature gates. Anchor its
+    # outer boundary at the component loop instead of the first nested endif.
+    boundary = "\n#endif\n\nvoid CommunicationNetProtocolComponent::loop()"
+    end = source.index(boundary, start) + len("\n#endif")
     active_executor = source[start:end]
     assert "this->mqtt_wire_.publish(this->mqtt_execution_reply_" in active_executor
     assert ".publish(" not in source[:start] + source[end:]

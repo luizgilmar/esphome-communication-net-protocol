@@ -53,6 +53,9 @@ CONF_FIELDS = "fields"
 CONF_FIELD = "field"
 CONF_LIGHT_IDS = "light_ids"
 CONF_BINARY_SENSOR_ID = "binary_sensor_id"
+CONF_DELAY = "delay"
+CONF_INTERRUPTIBLE = "interruptible"
+CONF_INTERRUPTS_ACTIVE = "interrupts_active"
 
 communication_ns = cg.esphome_ns.namespace("communication_net_protocol")
 CommunicationNetProtocolComponent = communication_ns.class_(
@@ -149,14 +152,22 @@ DESTINATION_SCHEMA = cv.Schema({
 })
 
 def _validate_light_completion(config):
-    if (CONF_LIGHT_ID in config) == (CONF_BINARY_SENSOR_ID in config):
-        raise cv.Invalid("completion requires exactly one of light_id or binary_sensor_id")
+    targets = sum(key in config for key in (CONF_LIGHT_ID, CONF_BINARY_SENSOR_ID, CONF_DELAY))
+    if targets != 1:
+        raise cv.Invalid("completion requires exactly one of light_id, binary_sensor_id or delay")
     if CONF_BINARY_SENSOR_ID in config and any(key in config for key in (
         CONF_ADDITIONAL_LIGHT_IDS, CONF_TOGGLE_REFERENCE_LIGHT_IDS, CONF_RGB,
         CONF_RGB_LIGHT_IDS, CONF_BRIGHTNESS, CONF_BRIGHTNESS_LIGHT_IDS,
         CONF_EFFECT, CONF_EFFECT_LIGHT_IDS, CONF_RESULT_RGB,
     )):
         raise cv.Invalid("binary sensor completion cannot use light options")
+    if CONF_DELAY in config and any(key in config for key in (
+        CONF_EXPECTED, CONF_ADDITIONAL_LIGHT_IDS, CONF_TOGGLE_REFERENCE_LIGHT_IDS,
+        CONF_RGB, CONF_RGB_LIGHT_IDS, CONF_BRIGHTNESS,
+        CONF_BRIGHTNESS_LIGHT_IDS, CONF_EFFECT, CONF_EFFECT_LIGHT_IDS,
+        CONF_RESULT_RGB,
+    )):
+        raise cv.Invalid("delay completion cannot use light options")
     if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
     if (CONF_BRIGHTNESS in config) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
@@ -176,6 +187,7 @@ def _validate_light_completion(config):
 LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     cv.Optional(CONF_LIGHT_ID): cv.use_id(light.LightState),
     cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor),
+    cv.Optional(CONF_DELAY): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
@@ -211,6 +223,8 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
     cv.Required(CONF_ID): _identifier(31, "inbound binding id"),
     cv.Required(CONF_RESOURCE): _identifier(63, "resource"),
     cv.Required(CONF_COMMAND): _identifier(63, "command"),
+    cv.Optional(CONF_INTERRUPTIBLE, default=False): cv.boolean,
+    cv.Optional(CONF_INTERRUPTS_ACTIVE, default=False): cv.boolean,
     cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA,
 }, single=True)
 
@@ -286,13 +300,39 @@ def _validate(config):
             raise cv.Invalid("state_snapshot fields must be unique")
     if CONF_INBOUND in config:
         names, routes = set(), set()
-        for binding in config[CONF_INBOUND][CONF_BINDINGS]:
+        bindings = config[CONF_INBOUND][CONF_BINDINGS]
+        for binding in bindings:
             name = binding[CONF_ID]
             route = (binding[CONF_RESOURCE], binding[CONF_COMMAND])
+            completion = binding.get(CONF_COMPLETION, {})
             if name in names or route in routes:
                 raise cv.Invalid(f"duplicate inbound binding: {name} {route}")
             names.add(name)
             routes.add(route)
+            if binding[CONF_INTERRUPTIBLE] and binding[CONF_INTERRUPTS_ACTIVE]:
+                raise cv.Invalid(f"binding {name} cannot be both interruptible and an interrupt")
+            if binding[CONF_INTERRUPTS_ACTIVE] and binding[CONF_COMMAND] != "stop":
+                raise cv.Invalid(f"interrupt binding {name} must use command: stop")
+            if (binding[CONF_INTERRUPTS_ACTIVE] and
+                    CONF_DELAY not in completion):
+                raise cv.Invalid(
+                    f"interrupt binding {name} requires completion.delay"
+                )
+            if (CONF_DELAY in completion and
+                    completion[CONF_TIMEOUT].total_milliseconds <=
+                    completion[CONF_DELAY].total_milliseconds):
+                raise cv.Invalid(
+                    f"binding {name} completion timeout must exceed delay"
+                )
+        for binding in bindings:
+            if binding[CONF_INTERRUPTS_ACTIVE] and not any(
+                candidate[CONF_INTERRUPTIBLE] and
+                candidate[CONF_RESOURCE] == binding[CONF_RESOURCE]
+                for candidate in bindings
+            ):
+                raise cv.Invalid(
+                    f"interrupt binding {binding[CONF_ID]} has no interruptible route for its resource"
+                )
     configured = {name for name in (CONF_MQTT, CONF_ESP_NOW) if name in config}
     policies = {}
     for policy in config[CONF_POLICIES]:
@@ -344,6 +384,10 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     esp_now = config.get(CONF_ESP_NOW)
     mqtt_config = config.get(CONF_MQTT)
+    interruptible_inbound = any(
+        binding[CONF_INTERRUPTIBLE] or binding[CONF_INTERRUPTS_ACTIVE]
+        for binding in config.get(CONF_INBOUND, {}).get(CONF_BINDINGS, [])
+    )
     if CONF_STATE_SNAPSHOT in config:
         cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT")
     if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):
@@ -352,6 +396,9 @@ async def to_code(config):
         cg.add_define("USE_COMMUNICATION_NET_INBOUND")
         cg.add_define("COMMUNICATION_NET_INBOUND_CAPACITY",
                       len(config[CONF_INBOUND][CONF_BINDINGS]))
+        if interruptible_inbound:
+            cg.add_define("USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND")
+            cg.add_define("USE_ESPNOW_NET_PROTOCOL_INTERRUPTIBLE_INBOUND")
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         cg.add_define("USE_COMMUNICATION_NET_ESPNOW_OBSERVER")
     var = cg.new_Pvariable(config[CONF_ID])
@@ -374,9 +421,14 @@ async def to_code(config):
                                      binding[CONF_COMMAND]))
         trigger = cg.new_Pvariable(binding[CONF_TRIGGER_ID])
         cg.add(trigger.set_route_id(binding[CONF_ID]))
+        cg.add(trigger.set_interruptible(binding[CONF_INTERRUPTIBLE]))
+        cg.add(trigger.set_interrupts_active(binding[CONF_INTERRUPTS_ACTIVE]))
         if CONF_COMPLETION in binding:
             completion = binding[CONF_COMPLETION]
-            if CONF_BINARY_SENSOR_ID in completion:
+            if CONF_DELAY in completion:
+                cg.add(trigger.set_completion_delay(
+                    completion[CONF_DELAY].total_milliseconds))
+            elif CONF_BINARY_SENSOR_ID in completion:
                 sensor = await cg.get_variable(completion[CONF_BINARY_SENSOR_ID])
                 cg.add(trigger.set_binary_sensor(sensor))
             else:
@@ -412,7 +464,10 @@ async def to_code(config):
         protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
         cg.add(var.set_espnow_observation_source(protocol))
         if esp_now[CONF_EXECUTE_INBOUND]:
-            cg.add(var.activate_inbound_executor(protocol))
+            if interruptible_inbound:
+                cg.add(var.activate_interruptible_inbound_executor(protocol))
+            else:
+                cg.add(var.activate_inbound_executor(protocol))
     if mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]:
         cg.add(var.set_mqtt_inbound_execution(mqtt_config[CONF_SOURCE_ID],
                                               mqtt_config[CONF_REPLY_TOPIC]))
