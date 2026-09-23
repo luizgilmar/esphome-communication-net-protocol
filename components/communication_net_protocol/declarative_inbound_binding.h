@@ -12,10 +12,14 @@ class LightState;
 namespace binary_sensor {
 class BinarySensor;
 }  // namespace binary_sensor
+namespace cover {
+class Cover;
+}  // namespace cover
 
 namespace communication_net_protocol {
 
 enum class LightExpectedState : uint8_t { ON, OFF, TOGGLED };
+enum class CoverExpectedState : uint8_t { OPEN, CLOSED, IDLE };
 
 // A route and its local action, with optional light state completion.
 class DeclarativeInboundBinding : public Trigger<> {
@@ -36,6 +40,10 @@ class DeclarativeInboundBinding : public Trigger<> {
   void set_expected(LightExpectedState expected) { expected_ = expected; }
   void set_binary_sensor(binary_sensor::BinarySensor *sensor) { sensor_ = sensor; }
   binary_sensor::BinarySensor *binary_sensor() const { return sensor_; }
+  void set_cover(cover::Cover *state) { cover_ = state; }
+  cover::Cover *cover() const { return cover_; }
+  void set_cover_expected(CoverExpectedState expected) { cover_expected_ = expected; }
+  CoverExpectedState cover_expected() const { return cover_expected_; }
   void set_result_rgb(bool enabled) { result_rgb_ = enabled; }
   bool result_rgb() const { return result_rgb_; }
   void set_expected_rgb(uint8_t red, uint8_t green, uint8_t blue) {
@@ -110,6 +118,8 @@ class DeclarativeInboundBinding : public Trigger<> {
   size_t toggle_reference_count_{0};
   LightExpectedState expected_{LightExpectedState::TOGGLED};
   binary_sensor::BinarySensor *sensor_{nullptr};
+  cover::Cover *cover_{nullptr};
+  CoverExpectedState cover_expected_{CoverExpectedState::IDLE};
   bool result_rgb_{false};
   uint8_t expected_rgb_[3]{};
   bool check_rgb_{false};

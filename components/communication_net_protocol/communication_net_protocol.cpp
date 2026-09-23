@@ -9,6 +9,7 @@
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/cover/cover.h"
 #endif
 
 namespace esphome {
@@ -233,6 +234,7 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
   }
   binding->trigger();
   if (binding->light() == nullptr && binding->binary_sensor() == nullptr &&
+      binding->cover() == nullptr &&
       !binding->timer_completion()) {
     NetResult immediate{};
     immediate.transaction_id = command.transaction_id;
@@ -294,11 +296,19 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
       this->mqtt_result_ready_ || this->active_binding_ == nullptr ||
       (this->active_binding_->light() == nullptr &&
        this->active_binding_->binary_sensor() == nullptr &&
+       this->active_binding_->cover() == nullptr &&
        !this->active_binding_->timer_completion())) return;
   bool completed = false;
   if (this->active_binding_->timer_completion()) {
     completed = now_ms - this->inbound_started_ms_ >=
                 this->active_binding_->completion_delay();
+  } else if (this->active_binding_->cover() != nullptr) {
+    const auto *state = this->active_binding_->cover();
+    completed = state->current_operation == cover::COVER_OPERATION_IDLE;
+    if (this->active_binding_->cover_expected() == CoverExpectedState::OPEN)
+      completed &= state->position >= 0.99f;
+    else if (this->active_binding_->cover_expected() == CoverExpectedState::CLOSED)
+      completed &= state->position <= 0.01f;
   } else {
     completed = this->active_binding_->binary_sensor() == nullptr ||
                 (this->active_binding_->binary_sensor()->has_state() &&
@@ -345,11 +355,13 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
     result.status = NetStatus::SUCCEEDED;
     result.remote_state.completeness =
         espnow_net_protocol::NetStateCompleteness::COMPLETE;
-    const uint8_t state = this->active_binding_->timer_completion() ? 0 :
+    const uint8_t state = (this->active_binding_->timer_completion() ||
+                           this->active_binding_->cover() != nullptr) ? 0 :
                           this->active_binding_->binary_sensor() != nullptr
                               ? (this->active_binding_->binary_sensor()->state ? 1 : 0)
                               : (this->active_binding_->light()->current_values.is_on() ? 1 : 0);
-    if (this->active_binding_->timer_completion()) {
+    if (this->active_binding_->timer_completion() ||
+        this->active_binding_->cover() != nullptr) {
       result.remote_state.completeness =
           espnow_net_protocol::NetStateCompleteness::NOT_PROVIDED;
     } else if (this->active_binding_->result_rgb()) {

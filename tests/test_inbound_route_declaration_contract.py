@@ -16,7 +16,9 @@ def test_route_declaration_supports_bounded_active_execution():
     assert 'cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA' in schema
     assert 'cv.Optional(CONF_LIGHT_ID): cv.use_id(light.LightState)' in schema
     assert 'cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor)' in schema
-    assert 'completion requires exactly one of light_id, binary_sensor_id or delay' in schema
+    assert 'completion requires exactly one of light_id, binary_sensor_id, cover_id or delay' in schema
+    assert 'cv.Optional(CONF_COVER_ID): cv.use_id(cover.Cover)' in schema
+    assert 'cover completion requires expected: open, closed or idle' in schema
     assert 'cv.Optional(CONF_DELAY): cv.positive_time_period_milliseconds' in schema
     assert 'binary sensor completion cannot use light options' in schema
     assert 'trigger.set_completion_timeout' in schema

@@ -3,7 +3,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import binary_sensor, light
+from esphome.components import binary_sensor, cover, light
 from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
@@ -53,6 +53,7 @@ CONF_FIELDS = "fields"
 CONF_FIELD = "field"
 CONF_LIGHT_IDS = "light_ids"
 CONF_BINARY_SENSOR_ID = "binary_sensor_id"
+CONF_COVER_ID = "cover_id"
 CONF_DELAY = "delay"
 CONF_INTERRUPTIBLE = "interruptible"
 CONF_INTERRUPTS_ACTIVE = "interrupts_active"
@@ -65,10 +66,16 @@ DeclarativeInboundBinding = communication_ns.class_(
     "DeclarativeInboundBinding", automation.Trigger.template()
 )
 LightExpectedState = communication_ns.enum("LightExpectedState", is_class=True)
+CoverExpectedState = communication_ns.enum("CoverExpectedState", is_class=True)
 LIGHT_EXPECTED_STATES = {
     "on": LightExpectedState.ON,
     "off": LightExpectedState.OFF,
     "toggled": LightExpectedState.TOGGLED,
+}
+COVER_EXPECTED_STATES = {
+    "open": CoverExpectedState.OPEN,
+    "closed": CoverExpectedState.CLOSED,
+    "idle": CoverExpectedState.IDLE,
 }
 
 
@@ -152,9 +159,13 @@ DESTINATION_SCHEMA = cv.Schema({
 })
 
 def _validate_light_completion(config):
-    targets = sum(key in config for key in (CONF_LIGHT_ID, CONF_BINARY_SENSOR_ID, CONF_DELAY))
+    targets = sum(key in config for key in (
+        CONF_LIGHT_ID, CONF_BINARY_SENSOR_ID, CONF_COVER_ID, CONF_DELAY
+    ))
     if targets != 1:
-        raise cv.Invalid("completion requires exactly one of light_id, binary_sensor_id or delay")
+        raise cv.Invalid(
+            "completion requires exactly one of light_id, binary_sensor_id, cover_id or delay"
+        )
     if CONF_BINARY_SENSOR_ID in config and any(key in config for key in (
         CONF_ADDITIONAL_LIGHT_IDS, CONF_TOGGLE_REFERENCE_LIGHT_IDS, CONF_RGB,
         CONF_RGB_LIGHT_IDS, CONF_BRIGHTNESS, CONF_BRIGHTNESS_LIGHT_IDS,
@@ -168,6 +179,18 @@ def _validate_light_completion(config):
         CONF_RESULT_RGB,
     )):
         raise cv.Invalid("delay completion cannot use light options")
+    if CONF_COVER_ID in config:
+        if str(config.get(CONF_EXPECTED, "")).lower() not in COVER_EXPECTED_STATES:
+            raise cv.Invalid("cover completion requires expected: open, closed or idle")
+        if any(key in config for key in (
+            CONF_ADDITIONAL_LIGHT_IDS, CONF_TOGGLE_REFERENCE_LIGHT_IDS,
+            CONF_RGB, CONF_RGB_LIGHT_IDS, CONF_BRIGHTNESS,
+            CONF_BRIGHTNESS_LIGHT_IDS, CONF_EFFECT, CONF_EFFECT_LIGHT_IDS,
+            CONF_RESULT_RGB,
+        )):
+            raise cv.Invalid("cover completion cannot use light options")
+    elif str(config.get(CONF_EXPECTED, "toggled")).lower() not in LIGHT_EXPECTED_STATES:
+        raise cv.Invalid("light completion requires expected: on, off or toggled")
     if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
     if (CONF_BRIGHTNESS in config) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
@@ -187,6 +210,7 @@ def _validate_light_completion(config):
 LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     cv.Optional(CONF_LIGHT_ID): cv.use_id(light.LightState),
     cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor),
+    cv.Optional(CONF_COVER_ID): cv.use_id(cover.Cover),
     cv.Optional(CONF_DELAY): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_ADDITIONAL_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
@@ -194,8 +218,8 @@ LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
     cv.Optional(CONF_TOGGLE_REFERENCE_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
-    cv.Optional(CONF_EXPECTED, default="toggled"): cv.enum(
-        LIGHT_EXPECTED_STATES, lower=True
+    cv.Optional(CONF_EXPECTED, default="toggled"): cv.one_of(
+        "on", "off", "toggled", "open", "closed", "idle", lower=True
     ),
     cv.Optional(CONF_TIMEOUT, default="2s"):
         cv.positive_time_period_milliseconds,
@@ -431,6 +455,9 @@ async def to_code(config):
             elif CONF_BINARY_SENSOR_ID in completion:
                 sensor = await cg.get_variable(completion[CONF_BINARY_SENSOR_ID])
                 cg.add(trigger.set_binary_sensor(sensor))
+            elif CONF_COVER_ID in completion:
+                cover_state = await cg.get_variable(completion[CONF_COVER_ID])
+                cg.add(trigger.set_cover(cover_state))
             else:
                 state = await cg.get_variable(completion[CONF_LIGHT_ID])
                 cg.add(trigger.set_light(state))
@@ -439,7 +466,12 @@ async def to_code(config):
             for reference_id in completion.get(CONF_TOGGLE_REFERENCE_LIGHT_IDS, []):
                 cg.add(trigger.add_toggle_reference_light(
                     await cg.get_variable(reference_id)))
-            cg.add(trigger.set_expected(completion[CONF_EXPECTED]))
+            if CONF_COVER_ID in completion:
+                cg.add(trigger.set_cover_expected(
+                    COVER_EXPECTED_STATES[completion[CONF_EXPECTED]]))
+            else:
+                cg.add(trigger.set_expected(
+                    LIGHT_EXPECTED_STATES[completion[CONF_EXPECTED]]))
             cg.add(trigger.set_result_rgb(completion[CONF_RESULT_RGB]))
             if CONF_RGB in completion:
                 rgb = completion[CONF_RGB]
