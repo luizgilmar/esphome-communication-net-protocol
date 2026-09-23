@@ -78,18 +78,24 @@ example: the references are recorded as IDs but not resolved/used at runtime.
 Do not install this alongside the existing Quartogian routes expecting it to
 change behavior. The original TX/HUB firmware and YAML remain unmodified.
 
-## Migration gates
+## Migration status
 
-1. Bind the MQTT/ESP-NOW component references and add bounded transport
-   adapters. Preserve the current Quartogian topics and message compatibility.
-2. Establish one application transaction identity across fallback. A second
-   transport must never repeat a non-idempotent `toggle` whose execution is
-   already known or uncertain without receiver-side cross-transport replay.
-3. Pilot only `light/spot_chuveiro`; validate successes, retries, duplicates,
-   no-response timeouts, offline recovery and effect confirmation on hardware.
-4. Migrate strips, blinds (`open`/`close`/`stop` and IN_PROGRESS), then scenes
-   according to local/HA dependencies. Delete each legacy YAML branch only
-   after equivalent tests pass for that resource.
+The Quartogian hardware validation now uses the active generic executor for
+MQTT and ESP-NOW with a shared application transaction identity and bounded
+cross-transport replay protection. Spot, strips, both panel relays and the
+blind routes have been migrated. The blind uses declarative cover completion
+for `open`, `close` and interrupting `stop`; terminal `INTERRUPTED` results are
+normalized identically on MQTT and ESP-NOW.
+
+The retained-state snapshot remains the authoritative asynchronous state feed
+for the TX indicators. Correlated ESP-NOW command results may update the mapped
+field immediately while MQTT snapshot recovery restores the complete state
+after broker reconnection. These are production responsibilities, not
+observation-only migration scaffolding.
+
+Receiver-side replay remains mandatory: a second transport must never execute
+a non-idempotent command again when the same application transaction was
+already accepted, completed or interrupted through the first transport.
 
 The generic component must not claim that full-mesh routing is implemented:
 current peers are direct neighbors, without relaying through HUBs.
