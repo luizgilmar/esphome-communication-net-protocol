@@ -3,6 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+#include "esphome/components/espnow_net_protocol/message_model.h"
+#endif
+
 namespace esphome {
 namespace light { class LightState; }
 namespace binary_sensor { class BinarySensor; }
@@ -18,12 +22,17 @@ class LightStateSnapshot {
   bool add_light_field(const char *field, bool rgb);
   bool add_light(light::LightState *light);
   bool add_binary_field(const char *field, binary_sensor::BinarySensor *sensor);
+  bool configured() const { return topic_ != nullptr && field_count_ != 0; }
   void loop(uint32_t now_ms, MqttWireTransport &mqtt);
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+  bool write_remote_state(espnow_net_protocol::NetStateSnapshot &snapshot) const;
+#endif
 
  private:
   static constexpr size_t MAX_FIELDS = 4;
   static constexpr size_t MAX_LIGHTS = 3;
   static constexpr size_t MAX_PAYLOAD = 384;
+  bool encode_payload_(char *payload, size_t capacity, size_t &used) const;
   struct Field {
     const char *name{nullptr};
     light::LightState *lights[MAX_LIGHTS]{};

@@ -61,6 +61,41 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
   if (!command.valid() || (command.payload.size() != 0 &&
       (command.payload.size() != 2 || command.payload.data()[0] != '{' ||
        command.payload.data()[1] != '}'))) return NetStart::INVALID_COMMAND;
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+  const bool snapshot_query = this->state_snapshot_.configured() &&
+      this->device_id_ != nullptr &&
+      std::strcmp(command.device_id.c_str(), this->device_id_) == 0 &&
+      std::strcmp(command.resource.c_str(), "state/snapshot") == 0 &&
+      std::strcmp(command.name.c_str(), "get") == 0;
+  if (snapshot_query) {
+    if (this->inbound_active_ || this->radio_result_ready_ ||
+        this->mqtt_result_ready_
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+        || this->interrupt_active_ || this->interrupt_radio_result_ready_ ||
+        this->interrupt_mqtt_result_ready_
+#endif
+        )
+      return NetStart::BUSY;
+    NetResult result{};
+    result.transaction_id = command.transaction_id;
+    result.execution.started = true;
+    if (this->state_snapshot_.write_remote_state(result.remote_state)) {
+      result.status = NetStatus::SUCCEEDED;
+    } else {
+      result.status = NetStatus::FAILED;
+      result.error.code = espnow_net_protocol::NetErrorCode::PROTOCOL_ERROR;
+      result.error.message.assign("state snapshot exceeds result payload");
+    }
+    this->inbound_result_ = result;
+    this->radio_result_ready_ = radio;
+    this->mqtt_result_ready_ = !radio;
+    ESP_LOGI(TAG, "State snapshot query transport=%s tx=%llu result=%u",
+             radio ? "esp_now" : "mqtt",
+             static_cast<unsigned long long>(command.transaction_id),
+             static_cast<unsigned>(result.status));
+    return NetStart::STARTED;
+  }
+#endif
   const InboundCommandView view{
       command.source_device_id.c_str(), command.source_boot_id,
       command.transaction_id,
@@ -579,7 +614,7 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
   const char *status = result.status == NetStatus::SUCCEEDED ? "succeeded" :
                        result.status == NetStatus::IN_PROGRESS ? "in_progress" :
                        result.status == NetStatus::REJECTED ? "rejected" : "failed";
-  char payload[384]{};
+  char payload[704]{};
   int size = 0;
   if (result.status == NetStatus::IN_PROGRESS) {
     size = std::snprintf(payload, sizeof(payload),
@@ -590,7 +625,33 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
   } else if (result.status == NetStatus::SUCCEEDED) {
     const auto &remote = result.remote_state;
     const bool on = remote.data.size() >= 1 && remote.data.data()[0] == 1;
-    if (std::strcmp(remote.schema.c_str(), "rgb-state/v1") == 0 &&
+    if (std::strcmp(remote.schema.c_str(), "state-fields/v1") == 0 &&
+        remote.data.size() != 0) {
+      static constexpr char DIGITS[] = "0123456789abcdef";
+      size = std::snprintf(payload, sizeof(payload),
+                           "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
+                           "\"execution\":{\"started\":true},\"remote_state\":{"
+                           "\"complete\":true,\"schema\":\"state-fields/v1\","
+                           "\"data_hex\":\"",
+                           static_cast<unsigned long long>(result.transaction_id));
+      if (size > 0) {
+        size_t used = static_cast<size_t>(size);
+        for (size_t index = 0; index < remote.data.size() &&
+                               used + 2 < sizeof(payload); ++index) {
+          payload[used++] = DIGITS[remote.data.data()[index] >> 4U];
+          payload[used++] = DIGITS[remote.data.data()[index] & 0x0FU];
+        }
+        if (used + 3 < sizeof(payload)) {
+          payload[used++] = '\"';
+          payload[used++] = '}';
+          payload[used++] = '}';
+          payload[used] = '\0';
+          size = static_cast<int>(used);
+        } else {
+          size = -1;
+        }
+      }
+    } else if (std::strcmp(remote.schema.c_str(), "rgb-state/v1") == 0 &&
         remote.data.size() == 5) {
       const uint8_t *rgb = remote.data.data();
       size = std::snprintf(payload, sizeof(payload),
