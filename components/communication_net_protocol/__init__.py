@@ -338,9 +338,10 @@ def _validate(config):
             if binding[CONF_INTERRUPTS_ACTIVE] and binding[CONF_COMMAND] != "stop":
                 raise cv.Invalid(f"interrupt binding {name} must use command: stop")
             if (binding[CONF_INTERRUPTS_ACTIVE] and
-                    CONF_DELAY not in completion):
+                    CONF_DELAY not in completion and
+                    CONF_COVER_ID not in completion):
                 raise cv.Invalid(
-                    f"interrupt binding {name} requires completion.delay"
+                    f"interrupt binding {name} requires delay or cover completion"
                 )
             if (CONF_DELAY in completion and
                     completion[CONF_TIMEOUT].total_milliseconds <=

@@ -260,9 +260,17 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
   if (this->interrupt_active_ && !this->interrupt_radio_result_ready_ &&
       !this->interrupt_mqtt_result_ready_ &&
       this->interrupt_binding_ != nullptr) {
-    const bool completed = this->interrupt_binding_->timer_completion() &&
+    bool completed = this->interrupt_binding_->timer_completion() &&
         now_ms - this->interrupt_started_ms_ >=
             this->interrupt_binding_->completion_delay();
+    if (this->interrupt_binding_->cover() != nullptr) {
+      const auto *state = this->interrupt_binding_->cover();
+      completed = state->current_operation == cover::COVER_OPERATION_IDLE;
+      if (this->interrupt_binding_->cover_expected() == CoverExpectedState::OPEN)
+        completed &= state->position >= 0.99f;
+      else if (this->interrupt_binding_->cover_expected() == CoverExpectedState::CLOSED)
+        completed &= state->position <= 0.01f;
+    }
     const bool timed_out = now_ms - this->interrupt_started_ms_ >=
                            this->interrupt_timeout_ms_;
     if (completed || timed_out) {

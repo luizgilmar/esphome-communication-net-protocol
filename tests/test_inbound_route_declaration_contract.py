@@ -39,7 +39,8 @@ def test_interruptible_inbound_is_opt_in_and_transaction_aware():
     assert 'CONF_INTERRUPTIBLE = "interruptible"' in schema
     assert 'CONF_INTERRUPTS_ACTIVE = "interrupts_active"' in schema
     assert 'interrupt binding {name} must use command: stop' in schema
-    assert 'interrupt binding {name} requires completion.delay' in schema
+    assert 'interrupt binding {name} requires delay or cover completion' in schema
+    assert 'this->interrupt_binding_->cover() != nullptr' in source
     assert 'USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND' in schema
     assert 'set_interruptible(binding[CONF_INTERRUPTIBLE])' in schema
     assert 'set_interrupts_active(binding[CONF_INTERRUPTS_ACTIVE])' in schema
