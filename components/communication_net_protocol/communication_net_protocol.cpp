@@ -545,7 +545,8 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
         result, sizeof(result),
         "{\"transaction_id\":\"%llu\",\"result\":\"rejected\","
         "\"execution\":{\"started\":false},\"error\":{"
-        "\"code\":\"remote_rejected\",\"retryable\":false}}",
+        "\"code\":\"remote_rejected\",\"message\":\"command rejected by executor\","
+        "\"retryable\":false}}",
         static_cast<unsigned long long>(fields.transaction_id));
     if (size > 0 && static_cast<size_t>(size) < sizeof(result))
       this->mqtt_wire_.publish(this->mqtt_execution_reply_,
@@ -613,12 +614,21 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
                             ? "interrupted" : result.error.code ==
                                 espnow_net_protocol::NetErrorCode::TARGET_UNAVAILABLE
                             ? "target_unavailable" : "timed_out";
+    const char *message = result.error.code ==
+                                  espnow_net_protocol::NetErrorCode::INTERRUPTED
+                              ? "operation interrupted by command"
+                              : result.error.code ==
+                                  espnow_net_protocol::NetErrorCode::TARGET_UNAVAILABLE
+                              ? "target unavailable"
+                              : "declared completion timed out";
     size = std::snprintf(payload, sizeof(payload),
                          "{\"transaction_id\":\"%llu\",\"result\":\"%s\","
                          "\"execution\":{\"started\":%s},\"error\":{"
-                         "\"code\":\"%s\",\"retryable\":false}}",
+                         "\"code\":\"%s\",\"message\":\"%s\","
+                         "\"retryable\":false}}",
                          static_cast<unsigned long long>(result.transaction_id), status,
-                         result.execution.started ? "true" : "false", error);
+                         result.execution.started ? "true" : "false", error,
+                         message);
   }
   if (size > 0 && static_cast<size_t>(size) < sizeof(payload) &&
       this->mqtt_wire_.publish(this->mqtt_execution_reply_,

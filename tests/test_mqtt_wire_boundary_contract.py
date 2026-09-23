@@ -43,3 +43,11 @@ def test_mailbox_is_bounded_and_does_not_parse_in_callback():
     assert "occupied_" in source and "dropped_" in source
     assert "std::vector" not in source
     assert "Json" not in source
+
+
+def test_active_executor_failure_results_include_normalized_error_message():
+    source = (COMPONENT / "communication_net_protocol.cpp").read_text(encoding="utf-8")
+    assert '\\\"message\\\":\\\"command rejected by executor\\\"' in source
+    assert 'const char *message = result.error.code ==' in source
+    assert '\\\"message\\\":\\\"%s\\\"' in source
+    assert '"operation interrupted by command"' in source
