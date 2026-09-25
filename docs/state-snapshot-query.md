@@ -24,7 +24,7 @@ version 1 at the result boundary during migration, but only emits version 2.
 The bounded binary data is:
 
 ```text
-version:u8, field_count:u8,
+version:u8, generation:u32-le, revision:u32-le, field_count:u8,
 repeated(field_name_size:u8, field_name:bytes, flags:u8,
          red:u8, green:u8, blue:u8, brightness:u8)
 ```
@@ -37,3 +37,31 @@ limit and below a single reassembled ESP-NOW result's 640-byte limit.
 ESP-NOW carries the bytes directly in the existing result codec. MQTT exposes
 the identical bytes in `remote_state.data_hex`, preserving one logical schema
 without adding a radio frame version.
+
+## Coalesced ESP-NOW push
+
+An optional producer push reduces the time between a local state change and an
+observer update while MQTT is unavailable. It is deliberately not an event
+queue: the producer retains one dirty bit, one in-flight version and the latest
+captured snapshot. Changes during an in-flight delivery replace the pending
+version instead of allocating another entry.
+
+```yaml
+state_snapshot:
+  topic: tx/status/quartogian/lights
+  push:
+    espnow_peer: tx_quartogian
+    settle: 300ms
+    min_interval: 1s
+    startup_quiet: 5s
+    startup_spread: 30s
+```
+
+The boot slot is derived from the producer identity and its persisted
+generation, so devices are distributed again after each collective restart.
+MQTT availability suppresses the background ESP-NOW push. Commands, command
+results and explicit query responses retain access to the serialized sender;
+the background push is admitted only when that sender is idle. A failed push
+does not append retries to a queue: the latest snapshot remains dirty and may
+be attempted again only after `min_interval`. Explicit periodic queries remain
+the repair mechanism for lost updates.

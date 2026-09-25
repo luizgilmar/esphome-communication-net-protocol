@@ -103,6 +103,16 @@ class CommunicationNetProtocolComponent : public Component
   bool add_snapshot_binary_field(const char *field, binary_sensor::BinarySensor *sensor) {
     return state_snapshot_.add_binary_field(field, sensor);
   }
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+  bool configure_state_snapshot_push(
+      espnow_net_protocol::EspNowNetProtocolComponent *endpoint,
+      const char *peer_id, uint32_t settle_ms, uint32_t min_interval_ms,
+      uint32_t startup_quiet_ms, uint32_t startup_spread_ms) {
+    return this->state_snapshot_.configure_push(
+        endpoint, peer_id, settle_ms, min_interval_ms, startup_quiet_ms,
+        startup_spread_ms);
+  }
+#endif
 #endif
 
   TransactionTracker<4> &transactions() { return this->transactions_; }

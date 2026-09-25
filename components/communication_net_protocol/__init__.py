@@ -50,6 +50,11 @@ CONF_TOPIC = "topic"
 CONF_QOS = "qos"
 CONF_INTERVAL = "interval"
 CONF_FIELDS = "fields"
+CONF_PUSH = "push"
+CONF_SETTLE = "settle"
+CONF_MIN_INTERVAL = "min_interval"
+CONF_STARTUP_QUIET = "startup_quiet"
+CONF_STARTUP_SPREAD = "startup_spread"
 CONF_FIELD = "field"
 CONF_LIGHT_IDS = "light_ids"
 CONF_BINARY_SENSOR_ID = "binary_sensor_id"
@@ -290,6 +295,13 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
     cv.Required(CONF_TOPIC): _prefix,
     cv.Optional(CONF_QOS, default=1): cv.int_range(min=0, max=2),
     cv.Optional(CONF_INTERVAL, default="500ms"): cv.positive_time_period_milliseconds,
+    cv.Optional(CONF_PUSH): cv.Schema({
+        cv.Required(CONF_ESPNOW_PEER): _identifier(63, "espnow push peer"),
+        cv.Optional(CONF_SETTLE, default="300ms"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_MIN_INTERVAL, default="1s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_STARTUP_QUIET, default="5s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_STARTUP_SPREAD, default="30s"): cv.positive_time_period_milliseconds,
+    }),
     cv.Required(CONF_FIELDS): cv.All(
         cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=4)
     ),
@@ -322,6 +334,8 @@ def _validate(config):
         fields = [field[CONF_FIELD] for field in config[CONF_STATE_SNAPSHOT][CONF_FIELDS]]
         if len(set(fields)) != len(fields):
             raise cv.Invalid("state_snapshot fields must be unique")
+        if CONF_PUSH in config[CONF_STATE_SNAPSHOT] and esp_now is None:
+            raise cv.Invalid("state_snapshot.push requires esp_now")
     if CONF_INBOUND in config:
         names, routes = set(), set()
         bindings = config[CONF_INBOUND][CONF_BINDINGS]
@@ -415,6 +429,8 @@ async def to_code(config):
     )
     if CONF_STATE_SNAPSHOT in config:
         cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT")
+        if CONF_PUSH in config[CONF_STATE_SNAPSHOT]:
+            cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH")
     if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):
         cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
     if CONF_INBOUND in config:
@@ -441,6 +457,16 @@ async def to_code(config):
                 cg.add(var.add_snapshot_light_field(field[CONF_FIELD], field[CONF_RGB]))
                 for light_id in field[CONF_LIGHT_IDS]:
                     cg.add(var.add_snapshot_light(await cg.get_variable(light_id)))
+        if CONF_PUSH in snapshot:
+            push = snapshot[CONF_PUSH]
+            protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
+            cg.add(var.configure_state_snapshot_push(
+                protocol, push[CONF_ESPNOW_PEER],
+                push[CONF_SETTLE].total_milliseconds,
+                push[CONF_MIN_INTERVAL].total_milliseconds,
+                push[CONF_STARTUP_QUIET].total_milliseconds,
+                push[CONF_STARTUP_SPREAD].total_milliseconds,
+            ))
     for binding in config.get(CONF_INBOUND, {}).get(CONF_BINDINGS, []):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))

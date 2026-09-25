@@ -33,6 +33,24 @@ bool LightStateSnapshot::configure(const char *topic, uint8_t qos,
   return true;
 }
 
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+bool LightStateSnapshot::configure_push(
+    espnow_net_protocol::EspNowNetProtocolComponent *endpoint,
+    const char *peer_id, uint32_t settle_ms, uint32_t min_interval_ms,
+    uint32_t startup_quiet_ms, uint32_t startup_spread_ms) {
+  if (endpoint == nullptr || peer_id == nullptr || !*peer_id ||
+      min_interval_ms == 0)
+    return false;
+  this->push_endpoint_ = endpoint;
+  this->push_peer_id_ = peer_id;
+  this->push_settle_ms_ = settle_ms;
+  this->push_min_interval_ms_ = min_interval_ms;
+  this->startup_quiet_ms_ = startup_quiet_ms;
+  this->startup_spread_ms_ = startup_spread_ms;
+  return true;
+}
+#endif
+
 bool LightStateSnapshot::add_light_field(const char *field, bool rgb) {
   if (field == nullptr || !*field || field_count_ >= MAX_FIELDS) return false;
   Field &item = fields_[field_count_++];
@@ -84,6 +102,17 @@ void LightStateSnapshot::setup() {
   }
   ESP_LOGI(TAG, "Snapshot generation ready generation=%u",
            static_cast<unsigned>(this->generation_));
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+  uint32_t startup_hash = this->preference_key_() ^ this->generation_;
+  startup_hash ^= startup_hash >> 16U;
+  startup_hash *= 0x7FEB352DUL;
+  startup_hash ^= startup_hash >> 15U;
+  const uint32_t offset = this->startup_spread_ms_ == 0
+                              ? 0
+                              : startup_hash % this->startup_spread_ms_;
+  this->startup_push_due_ms_ = this->startup_quiet_ms_ + offset;
+  this->push_not_before_ms_ = this->startup_push_due_ms_;
+#endif
 }
 
 bool LightStateSnapshot::capture_(Value *values) const {
@@ -182,7 +211,7 @@ bool LightStateSnapshot::encode_payload_(const Value *values, char *payload,
   return true;
 }
 
-#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+#if defined(USE_COMMUNICATION_NET_ACTIVE_GATE) || defined(USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH)
 bool LightStateSnapshot::write_remote_state(
     espnow_net_protocol::NetStateSnapshot &snapshot) {
   Value values[MAX_FIELDS]{};
@@ -222,21 +251,110 @@ bool LightStateSnapshot::write_remote_state(
 }
 #endif
 
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+uint64_t LightStateSnapshot::push_transaction_id_() const {
+  return 0xD000000000000000ULL |
+         (static_cast<uint64_t>(this->generation_ & 0x0FFFFFFFUL) << 32U) |
+         this->revision_;
+}
+
+void LightStateSnapshot::process_push_completion_(uint32_t now_ms) {
+  if (!this->push_inflight_ || this->push_endpoint_ == nullptr) return;
+  espnow_net_protocol::TransactionId transaction_id = 0;
+  bool succeeded = false;
+  if (!this->push_endpoint_->take_background_result_completion(transaction_id,
+                                                                succeeded)) {
+    if (!this->push_endpoint_->runtime_enabled() ||
+        !this->push_endpoint_->background_result_active()) {
+      this->push_inflight_ = false;
+      this->push_transaction_id_inflight_ = 0;
+      this->push_not_before_ms_ = now_ms + this->push_min_interval_ms_;
+    }
+    return;
+  }
+  if (transaction_id != this->push_transaction_id_inflight_) return;
+  this->push_inflight_ = false;
+  this->push_transaction_id_inflight_ = 0;
+  if (succeeded && this->generation_ == this->push_generation_ &&
+      this->revision_ == this->push_revision_)
+    this->push_dirty_ = false;
+  if (!succeeded) this->push_not_before_ms_ = now_ms + this->push_min_interval_ms_;
+  ESP_LOGI(TAG,
+           "ESP-NOW snapshot push completed generation=%u revision=%u "
+           "succeeded=%s dirty=%s",
+           static_cast<unsigned>(this->push_generation_),
+           static_cast<unsigned>(this->push_revision_), YESNO(succeeded),
+           YESNO(this->push_dirty_));
+}
+
+void LightStateSnapshot::try_push_(uint32_t now_ms, bool mqtt_connected) {
+  if (mqtt_connected || !this->push_dirty_ || this->push_inflight_ ||
+      this->push_endpoint_ == nullptr || this->push_peer_id_ == nullptr ||
+      static_cast<int32_t>(now_ms - this->push_not_before_ms_) < 0 ||
+      (this->last_push_attempt_ms_ != 0 &&
+       now_ms - this->last_push_attempt_ms_ < this->push_min_interval_ms_))
+    return;
+  this->last_push_attempt_ms_ = now_ms;
+  const auto peer = this->push_endpoint_->peer_index(this->push_peer_id_);
+  if (peer == espnow_net_protocol::INVALID_PEER_INDEX) return;
+  espnow_net_protocol::NetResult result{};
+  result.transaction_id = this->push_transaction_id_();
+  result.status = espnow_net_protocol::NetResultStatus::SUCCEEDED;
+  result.execution.started = true;
+  if (!this->write_remote_state(result.remote_state) ||
+      !this->push_endpoint_->start_background_result(peer, result))
+    return;
+  this->push_generation_ = this->generation_;
+  this->push_revision_ = this->revision_;
+  this->push_transaction_id_inflight_ = result.transaction_id;
+  this->push_inflight_ = true;
+  ESP_LOGI(TAG,
+           "ESP-NOW snapshot push started peer=%s generation=%u revision=%u "
+           "tx=%llu",
+           this->push_peer_id_, static_cast<unsigned>(this->push_generation_),
+           static_cast<unsigned>(this->push_revision_),
+           static_cast<unsigned long long>(result.transaction_id));
+}
+#endif
+
 void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
-  if (topic_ == nullptr || field_count_ == 0 ||
-      (was_connected_ && now_ms - last_check_ms_ < interval_ms_)) return;
-  last_check_ms_ = now_ms;
+  if (topic_ == nullptr || field_count_ == 0) return;
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+  this->process_push_completion_(now_ms);
+#endif
   const bool connected = mqtt.available();
+  if (last_check_ms_ != 0 && now_ms - last_check_ms_ < interval_ms_) {
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+    this->try_push_(now_ms, connected);
+#endif
+    return;
+  }
+  last_check_ms_ = now_ms;
+  const bool had_values = this->values_observed_;
+  Value values[MAX_FIELDS]{};
+  if (!this->capture_(values)) return;
+  const bool changed = this->update_version_(values);
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+  if (changed) {
+    this->push_dirty_ = true;
+    const uint32_t settled = now_ms + this->push_settle_ms_;
+    this->push_not_before_ms_ = !had_values
+                                    ? this->startup_push_due_ms_
+                                    : settled;
+    if (static_cast<int32_t>(this->startup_push_due_ms_ -
+                             this->push_not_before_ms_) > 0)
+      this->push_not_before_ms_ = this->startup_push_due_ms_;
+  }
+#endif
   if (!connected) {
     was_connected_ = false;
     published_ = false;
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+    this->try_push_(now_ms, false);
+#endif
     return;
   }
   was_connected_ = true;
-
-  Value values[MAX_FIELDS]{};
-  if (!this->capture_(values)) return;
-  this->update_version_(values);
   if (!this->version_ready_ || this->revision_ == 0 ||
       (this->published_ &&
        this->published_generation_ == this->generation_ &&
@@ -251,6 +369,9 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
   if (!mqtt.publish(topic_, reinterpret_cast<const uint8_t *>(payload), used,
                     qos_, true)) return;
   published_ = true;
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
+  if (!this->push_inflight_) this->push_dirty_ = false;
+#endif
   this->published_generation_ = this->generation_;
   this->published_revision_ = this->revision_;
   ESP_LOGI(TAG,
