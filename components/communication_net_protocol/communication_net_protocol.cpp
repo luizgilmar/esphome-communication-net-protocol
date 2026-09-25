@@ -625,15 +625,17 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
   } else if (result.status == NetStatus::SUCCEEDED) {
     const auto &remote = result.remote_state;
     const bool on = remote.data.size() >= 1 && remote.data.data()[0] == 1;
-    if (std::strcmp(remote.schema.c_str(), "state-fields/v1") == 0 &&
+    if ((std::strcmp(remote.schema.c_str(), "state-fields/v1") == 0 ||
+         std::strcmp(remote.schema.c_str(), "state-fields/v2") == 0) &&
         remote.data.size() != 0) {
       static constexpr char DIGITS[] = "0123456789abcdef";
       size = std::snprintf(payload, sizeof(payload),
                            "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
                            "\"execution\":{\"started\":true},\"remote_state\":{"
-                           "\"complete\":true,\"schema\":\"state-fields/v1\","
+                           "\"complete\":true,\"schema\":\"%s\","
                            "\"data_hex\":\"",
-                           static_cast<unsigned long long>(result.transaction_id));
+                           static_cast<unsigned long long>(result.transaction_id),
+                           remote.schema.c_str());
       if (size > 0) {
         size_t used = static_cast<size_t>(size);
         for (size_t index = 0; index < remote.data.size() &&

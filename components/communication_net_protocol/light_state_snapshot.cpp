@@ -17,6 +17,13 @@ namespace communication_net_protocol {
 
 static const char *const TAG = "communication_net_protocol.snapshot";
 
+static void put_u32(uint8_t *target, uint32_t value) {
+  target[0] = static_cast<uint8_t>(value);
+  target[1] = static_cast<uint8_t>(value >> 8U);
+  target[2] = static_cast<uint8_t>(value >> 16U);
+  target[3] = static_cast<uint8_t>(value >> 24U);
+}
+
 bool LightStateSnapshot::configure(const char *topic, uint8_t qos,
                                    uint32_t interval_ms) {
   if (topic == nullptr || !*topic || qos > 2 || interval_ms == 0) return false;
@@ -52,48 +59,119 @@ bool LightStateSnapshot::add_binary_field(const char *field,
   return true;
 }
 
-bool LightStateSnapshot::encode_payload_(char *payload, size_t capacity,
-                                         size_t &used) const {
-  used = 0;
-  if (payload == nullptr || capacity < 3 || field_count_ == 0) return false;
-  payload[used++] = '{';
-  for (size_t i = 0; i < field_count_; ++i) {
-    const Field &field = fields_[i];
-    bool known = true;
-    bool on = false;
-    uint8_t red = 0, green = 0, blue = 0, brightness = 0;
-    bool effect_active = false;
+uint32_t LightStateSnapshot::preference_key_() const {
+  uint32_t hash = 2166136261UL ^ 0xC9E20002UL;
+  if (this->topic_ != nullptr)
+    for (const char *cursor = this->topic_; *cursor != '\0'; ++cursor) {
+      hash ^= static_cast<uint8_t>(*cursor);
+      hash *= 16777619UL;
+    }
+  return hash == 0 ? 1 : hash;
+}
+
+void LightStateSnapshot::setup() {
+  if (!this->configured()) return;
+  this->generation_preference_ =
+      global_preferences->make_preference<uint32_t>(this->preference_key_());
+  uint32_t previous = 0;
+  this->generation_preference_.load(&previous);
+  this->generation_ = previous == UINT32_MAX ? 1 : previous + 1;
+  this->version_ready_ =
+      this->generation_preference_.save(&this->generation_);
+  if (!this->version_ready_) {
+    ESP_LOGE(TAG, "Snapshot generation could not be persisted");
+    return;
+  }
+  ESP_LOGI(TAG, "Snapshot generation ready generation=%u",
+           static_cast<unsigned>(this->generation_));
+}
+
+bool LightStateSnapshot::capture_(Value *values) const {
+  if (values == nullptr || this->field_count_ == 0) return false;
+  for (size_t i = 0; i < this->field_count_; ++i) {
+    const Field &field = this->fields_[i];
+    Value &value = values[i];
+    value = {};
+    value.known = 1;
+    value.rgb = field.rgb ? 1 : 0;
     if (field.sensor != nullptr) {
-      known = field.sensor->has_state();
-      on = known && field.sensor->state;
-    } else {
-      light::LightState *selected = field.lights[0];
-      for (uint8_t j = 0; j < field.light_count; ++j) {
-        if (field.lights[j]->current_values.is_on()) {
-          if (!on) selected = field.lights[j];
-          on = true;
-        }
-      }
-      if (field.rgb && selected != nullptr) {
-        const auto &values = selected->current_values;
-        const auto &effect = selected->get_effect_name();
-        effect_active = on && !effect.empty() && effect != "None";
-        red = static_cast<uint8_t>(values.get_red() * 255.0f);
-        green = static_cast<uint8_t>(values.get_green() * 255.0f);
-        blue = static_cast<uint8_t>(values.get_blue() * 255.0f);
-        brightness = static_cast<uint8_t>(values.get_brightness() * 255.0f);
+      value.known = field.sensor->has_state() ? 1 : 0;
+      value.on = value.known && field.sensor->state ? 1 : 0;
+      continue;
+    }
+    light::LightState *selected = field.lights[0];
+    for (uint8_t j = 0; j < field.light_count; ++j) {
+      if (field.lights[j]->current_values.is_on()) {
+        if (!value.on) selected = field.lights[j];
+        value.on = 1;
       }
     }
+    if (!field.rgb || selected == nullptr) continue;
+    const auto &current = selected->current_values;
+    const auto &effect = selected->get_effect_name();
+    value.effect_active =
+        value.on && !effect.empty() && effect != "None" ? 1 : 0;
+    value.red = static_cast<uint8_t>(current.get_red() * 255.0f);
+    value.green = static_cast<uint8_t>(current.get_green() * 255.0f);
+    value.blue = static_cast<uint8_t>(current.get_blue() * 255.0f);
+    value.brightness =
+        static_cast<uint8_t>(current.get_brightness() * 255.0f);
+  }
+  return true;
+}
+
+bool LightStateSnapshot::update_version_(const Value *values) {
+  if (!this->version_ready_ || values == nullptr) return false;
+  const size_t bytes = this->field_count_ * sizeof(Value);
+  if (this->values_observed_ &&
+      std::memcmp(values, this->last_values_, bytes) == 0)
+    return false;
+  if (this->revision_ == UINT32_MAX) {
+    this->generation_ = this->generation_ == UINT32_MAX
+                            ? 1
+                            : this->generation_ + 1;
+    if (!this->generation_preference_.save(&this->generation_)) {
+      this->version_ready_ = false;
+      ESP_LOGE(TAG, "Snapshot generation rollover could not be persisted");
+      return false;
+    }
+    this->revision_ = 0;
+  }
+  this->revision_++;
+  std::memcpy(this->last_values_, values, bytes);
+  this->values_observed_ = true;
+  return true;
+}
+
+bool LightStateSnapshot::encode_payload_(const Value *values, char *payload,
+                                         size_t capacity,
+                                         size_t &used) const {
+  used = 0;
+  if (values == nullptr || payload == nullptr || capacity < 3 ||
+      this->field_count_ == 0 || !this->version_ready_ ||
+      this->revision_ == 0)
+    return false;
+  const int metadata = std::snprintf(
+      payload, capacity,
+      "{\"_meta\":{\"version\":2,\"generation\":%u,\"revision\":%u}",
+      static_cast<unsigned>(this->generation_),
+      static_cast<unsigned>(this->revision_));
+  if (metadata < 0 || static_cast<size_t>(metadata) >= capacity) return false;
+  used = static_cast<size_t>(metadata);
+  for (size_t i = 0; i < field_count_; ++i) {
+    const Field &field = fields_[i];
+    const Value &value = values[i];
     const int written = field.rgb
         ? std::snprintf(payload + used, capacity - used,
-                        "%s\"%s\":{\"known\":%s,\"on\":%s,\"red\":%u,\"green\":%u,\"blue\":%u,\"brightness\":%u,\"effect_active\":%s}",
-                        i ? "," : "", field.name, known ? "true" : "false",
-                        on ? "true" : "false", red, green, blue, brightness,
-                        effect_active ? "true" : "false")
+                        ",\"%s\":{\"known\":%s,\"on\":%s,\"red\":%u,\"green\":%u,\"blue\":%u,\"brightness\":%u,\"effect_active\":%s}",
+                        field.name, value.known ? "true" : "false",
+                        value.on ? "true" : "false", value.red, value.green,
+                        value.blue, value.brightness,
+                        value.effect_active ? "true" : "false")
         : std::snprintf(payload + used, capacity - used,
-                        "%s\"%s\":{\"known\":%s,\"on\":%s}",
-                        i ? "," : "", field.name, known ? "true" : "false",
-                        on ? "true" : "false");
+                        ",\"%s\":{\"known\":%s,\"on\":%s}", field.name,
+                        value.known ? "true" : "false",
+                        value.on ? "true" : "false");
     if (written < 0 || static_cast<size_t>(written) >= capacity - used)
       return false;
     used += static_cast<size_t>(written);
@@ -106,57 +184,40 @@ bool LightStateSnapshot::encode_payload_(char *payload, size_t capacity,
 
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
 bool LightStateSnapshot::write_remote_state(
-    espnow_net_protocol::NetStateSnapshot &snapshot) const {
+    espnow_net_protocol::NetStateSnapshot &snapshot) {
+  Value values[MAX_FIELDS]{};
+  if (!this->capture_(values)) return false;
+  this->update_version_(values);
+  if (!this->version_ready_ || this->revision_ == 0) return false;
   uint8_t payload[espnow_net_protocol::NetStateSnapshot::MAX_DATA_SIZE]{};
   size_t used = 0;
-  payload[used++] = 1;  // state-fields/v1 binary encoding version
+  payload[used++] = 2;  // state-fields/v2 binary encoding version
+  put_u32(payload + used, this->generation_);
+  used += 4;
+  put_u32(payload + used, this->revision_);
+  used += 4;
   payload[used++] = static_cast<uint8_t>(field_count_);
   for (size_t index = 0; index < field_count_; ++index) {
     const Field &field = fields_[index];
+    const Value &value = values[index];
     const size_t name_size = std::strlen(field.name);
     if (name_size == 0 || name_size > 31 ||
         used + 1 + name_size + 5 > sizeof(payload))
       return false;
-    bool known = true;
-    bool on = false;
-    uint8_t red = 0, green = 0, blue = 0, brightness = 0;
-    bool effect_active = false;
-    if (field.sensor != nullptr) {
-      known = field.sensor->has_state();
-      on = known && field.sensor->state;
-    } else {
-      light::LightState *selected = field.lights[0];
-      for (uint8_t light_index = 0; light_index < field.light_count;
-           ++light_index) {
-        if (field.lights[light_index]->current_values.is_on()) {
-          if (!on) selected = field.lights[light_index];
-          on = true;
-        }
-      }
-      if (field.rgb && selected != nullptr) {
-        const auto &values = selected->current_values;
-        const auto &effect = selected->get_effect_name();
-        effect_active = on && !effect.empty() && effect != "None";
-        red = static_cast<uint8_t>(values.get_red() * 255.0f);
-        green = static_cast<uint8_t>(values.get_green() * 255.0f);
-        blue = static_cast<uint8_t>(values.get_blue() * 255.0f);
-        brightness = static_cast<uint8_t>(values.get_brightness() * 255.0f);
-      }
-    }
     payload[used++] = static_cast<uint8_t>(name_size);
     std::memcpy(payload + used, field.name, name_size);
     used += name_size;
-    payload[used++] = (known ? 0x01 : 0) | (on ? 0x02 : 0) |
+    payload[used++] = (value.known ? 0x01 : 0) | (value.on ? 0x02 : 0) |
                       (field.rgb ? 0x04 : 0) |
-                      (effect_active ? 0x08 : 0);
-    payload[used++] = red;
-    payload[used++] = green;
-    payload[used++] = blue;
-    payload[used++] = brightness;
+                      (value.effect_active ? 0x08 : 0);
+    payload[used++] = value.red;
+    payload[used++] = value.green;
+    payload[used++] = value.blue;
+    payload[used++] = value.brightness;
   }
   snapshot = {};
   snapshot.completeness = espnow_net_protocol::NetStateCompleteness::COMPLETE;
-  return snapshot.schema.assign("state-fields/v1") &&
+  return snapshot.schema.assign("state-fields/v2") &&
          snapshot.data.assign(payload, used);
 }
 #endif
@@ -173,19 +234,30 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
   }
   was_connected_ = true;
 
-  char payload[MAX_PAYLOAD]{};
+  Value values[MAX_FIELDS]{};
+  if (!this->capture_(values)) return;
+  this->update_version_(values);
+  if (!this->version_ready_ || this->revision_ == 0 ||
+      (this->published_ &&
+       this->published_generation_ == this->generation_ &&
+       this->published_revision_ == this->revision_))
+    return;
+  char payload[MAX_WIRE_PAYLOAD]{};
   size_t used = 0;
-  if (!this->encode_payload_(payload, sizeof(payload), used)) {
+  if (!this->encode_payload_(values, payload, sizeof(payload), used)) {
     ESP_LOGE(TAG, "Snapshot exceeds bounded payload");
     return;
   }
-  if (published_ && std::strcmp(payload, last_payload_) == 0) return;
   if (!mqtt.publish(topic_, reinterpret_cast<const uint8_t *>(payload), used,
                     qos_, true)) return;
-  std::memcpy(last_payload_, payload, used + 1);
   published_ = true;
-  ESP_LOGI(TAG, "Retained snapshot published topic=%s bytes=%u",
-           topic_, static_cast<unsigned>(used));
+  this->published_generation_ = this->generation_;
+  this->published_revision_ = this->revision_;
+  ESP_LOGI(TAG,
+           "Retained snapshot published topic=%s generation=%u revision=%u "
+           "bytes=%u",
+           topic_, static_cast<unsigned>(this->generation_),
+           static_cast<unsigned>(this->revision_), static_cast<unsigned>(used));
 }
 
 }  // namespace communication_net_protocol

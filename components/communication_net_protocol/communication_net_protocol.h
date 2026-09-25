@@ -83,7 +83,11 @@ class CommunicationNetProtocolComponent : public Component
     mqtt_execution_reply_ = reply_topic;
   }
 #endif
-  void setup() override {}
+  void setup() override {
+#ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
+    this->state_snapshot_.setup();
+#endif
+  }
   void loop() override;
   void dump_config() override;
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT

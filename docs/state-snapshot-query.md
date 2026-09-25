@@ -12,7 +12,14 @@ payload: {}
 
 The command does not run an ESPHome automation and does not mutate any entity.
 It reads only the fields declared under `state_snapshot.fields` and returns a
-successful `NetResult` whose remote state uses schema `state-fields/v1`.
+successful `NetResult` whose remote state uses schema `state-fields/v2`.
+
+Version 2 carries a persistent producer generation and an in-generation
+revision. The generation advances once per producer boot; the revision advances
+only when the bounded observed values change. MQTT retained JSON publishes the
+same pair under `_meta`, so MQTT and ESP-NOW results can be ordered by the
+consumer without using arrival time. The producer keeps decoding support for
+version 1 at the result boundary during migration, but only emits version 2.
 
 The bounded binary data is:
 
