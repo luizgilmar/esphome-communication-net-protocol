@@ -370,7 +370,11 @@ void LightStateSnapshot::loop(uint32_t now_ms, MqttWireTransport &mqtt) {
                     qos_, true)) return;
   published_ = true;
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH
-  if (!this->push_inflight_) this->push_dirty_ = false;
+  // A successful retained MQTT publication makes the current revision
+  // available through the primary transport.  Clear the pending background
+  // push even if an older ESP-NOW revision is still in flight; otherwise that
+  // stale dirty bit can trigger an unnecessary push when MQTT disconnects.
+  this->push_dirty_ = false;
 #endif
   this->published_generation_ = this->generation_;
   this->published_revision_ = this->revision_;

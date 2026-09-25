@@ -30,6 +30,14 @@ def test_mqtt_connectivity_suppresses_background_push() -> None:
     assert "push_min_interval_ms_" in push
 
 
+def test_successful_mqtt_publication_clears_pending_push_while_inflight() -> None:
+    source = (C / "light_state_snapshot.cpp").read_text(encoding="utf-8")
+    publish = source[source.index("if (!mqtt.publish(") :]
+    publish = publish[: publish.index("this->published_generation_")]
+    assert "this->push_dirty_ = false;" in publish
+    assert "if (!this->push_inflight_)" not in publish
+
+
 def test_startup_spread_changes_each_persisted_generation() -> None:
     source = (C / "light_state_snapshot.cpp").read_text(encoding="utf-8")
     setup = source[source.index("void LightStateSnapshot::setup()") :]
