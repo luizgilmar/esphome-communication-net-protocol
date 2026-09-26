@@ -47,23 +47,25 @@ class InboundReplayGuard {
       return InboundDecision::INVALID;
     const size_t source_length = bounded_length_(source_id);
     if (source_length == 0 || source_length > MaxSource) return InboundDecision::INVALID;
+    size_t session_index = this->find_session_index_(source_id, source_boot_id);
+    Session *session = session_index < Capacity ? &sessions_[session_index] : nullptr;
     for (const auto &entry : entries_) {
-      if (!entry.occupied || entry.source_boot_id != source_boot_id ||
-          entry.transaction_id != transaction_id ||
-          std::strcmp(entry.source_id, source_id) != 0) continue;
+      if (!entry.occupied || session == nullptr ||
+          entry.session_index != session_index ||
+          entry.transaction_id != transaction_id) continue;
       if (entry.command_length != command_length ||
           std::memcmp(entry.command, command, command_length) != 0)
         return InboundDecision::CONFLICT;
       return entry.terminal ? InboundDecision::DUPLICATE_TERMINAL
                             : InboundDecision::DUPLICATE_PENDING;
     }
-    Session *session = this->find_session_(source_id, source_boot_id);
     if (session != nullptr && transaction_id <= session->retired_through)
       return InboundDecision::RETIRED;
     if (session == nullptr) {
-      for (auto &candidate : sessions_) {
-        if (candidate.occupied) continue;
-        session = &candidate;
+      for (size_t index = 0; index < Capacity; ++index) {
+        if (sessions_[index].occupied) continue;
+        session_index = index;
+        session = &sessions_[index];
         break;
       }
       if (session == nullptr) return InboundDecision::FULL;
@@ -80,9 +82,9 @@ class InboundReplayGuard {
           free_entry = &entry;
       }
       if (free_entry == nullptr) return InboundDecision::FULL;
-      Session *retired = find_session_(free_entry->source_id,
-                                       free_entry->source_boot_id);
-      if (retired == nullptr) return InboundDecision::FULL;
+      if (free_entry->session_index >= Capacity) return InboundDecision::FULL;
+      Session *retired = &sessions_[free_entry->session_index];
+      if (!retired->occupied) return InboundDecision::FULL;
       if (retired->retired_through < free_entry->transaction_id)
         retired->retired_through = free_entry->transaction_id;
       if (retired == session && transaction_id <= session->retired_through)
@@ -94,8 +96,7 @@ class InboundReplayGuard {
       session->occupied = true;
     }
     *free_entry = {};
-    std::memcpy(free_entry->source_id, source_id, source_length + 1);
-    free_entry->source_boot_id = source_boot_id;
+    free_entry->session_index = static_cast<uint8_t>(session_index);
     free_entry->transaction_id = transaction_id;
     std::memcpy(free_entry->command, command, command_length);
     free_entry->command_length = command_length;
@@ -112,10 +113,12 @@ class InboundReplayGuard {
     if (source_id == nullptr || command == nullptr || command_length == 0 ||
         command_length > MaxCommand || result.length > MaxTerminal ||
         (result.data == nullptr && result.length != 0)) return false;
+    const size_t session_index =
+        this->find_session_index_(source_id, source_boot_id);
+    if (session_index >= Capacity) return false;
     for (auto &entry : entries_) {
-      if (!entry.occupied || entry.source_boot_id != source_boot_id ||
+      if (!entry.occupied || entry.session_index != session_index ||
           entry.transaction_id != transaction_id ||
-          std::strcmp(entry.source_id, source_id) != 0 ||
           entry.command_length != command_length ||
           std::memcmp(entry.command, command, command_length) != 0) continue;
       if (entry.terminal) return false;
@@ -138,11 +141,13 @@ class InboundReplayGuard {
     written = 0;
     if (source_id == nullptr || command == nullptr || command_length == 0 ||
         command_length > MaxCommand) return false;
+    const size_t session_index =
+        this->find_session_index_(source_id, source_boot_id);
+    if (session_index >= Capacity) return false;
     for (const auto &entry : entries_) {
       if (!entry.occupied || !entry.terminal ||
-          entry.source_boot_id != source_boot_id ||
+          entry.session_index != session_index ||
           entry.transaction_id != transaction_id ||
-          std::strcmp(entry.source_id, source_id) != 0 ||
           entry.command_length != command_length ||
           std::memcmp(entry.command, command, command_length) != 0 ||
           capacity < entry.terminal_length ||
@@ -160,13 +165,15 @@ class InboundReplayGuard {
   // old terminal entries. Keep uncertain pending commands reserved.
   size_t clear_source_session(const char *source_id, uint64_t old_boot_id) {
     if (source_id == nullptr || old_boot_id == 0) return 0;
+    const size_t session_index =
+        this->find_session_index_(source_id, old_boot_id);
+    if (session_index >= Capacity) return 0;
+    Session *session = &sessions_[session_index];
     size_t removed = 0;
     for (auto &entry : entries_) {
       if (!entry.occupied || !entry.terminal ||
-          entry.source_boot_id != old_boot_id ||
-          std::strcmp(entry.source_id, source_id) != 0) continue;
-      Session *session = find_session_(entry.source_id, entry.source_boot_id);
-      if (session != nullptr && session->retired_through < entry.transaction_id)
+          entry.session_index != session_index) continue;
+      if (session->retired_through < entry.transaction_id)
         session->retired_through = entry.transaction_id;
       entry = {};
       ++removed;
@@ -176,8 +183,6 @@ class InboundReplayGuard {
 
  private:
   struct Entry {
-    char source_id[MaxSource + 1]{};
-    uint64_t source_boot_id{0};
     uint64_t transaction_id{0};
     uint8_t command[MaxCommand]{};
     size_t command_length{0};
@@ -186,6 +191,7 @@ class InboundReplayGuard {
     InboundTerminalStatus terminal_status{InboundTerminalStatus::FAILED};
     bool occupied{false};
     bool terminal{false};
+    uint8_t session_index{0};
     uint64_t sequence{0};
   };
 
@@ -196,11 +202,13 @@ class InboundReplayGuard {
     bool occupied{false};
   };
 
-  Session *find_session_(const char *source_id, uint64_t source_boot_id) {
-    for (auto &session : sessions_)
-      if (session.occupied && session.source_boot_id == source_boot_id &&
-          std::strcmp(session.source_id, source_id) == 0) return &session;
-    return nullptr;
+  size_t find_session_index_(const char *source_id,
+                             uint64_t source_boot_id) const {
+    for (size_t index = 0; index < Capacity; ++index)
+      if (sessions_[index].occupied &&
+          sessions_[index].source_boot_id == source_boot_id &&
+          std::strcmp(sessions_[index].source_id, source_id) == 0) return index;
+    return Capacity;
   }
 
   static size_t bounded_length_(const char *value) {

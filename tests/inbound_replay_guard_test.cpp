@@ -8,6 +8,8 @@ using esphome::communication_net_protocol::InboundTerminalStatus;
 
 int main() {
   InboundReplayGuard<2, 16, 8> guard;
+  static_assert(sizeof(InboundReplayGuard<2, 16, 8>) <= 720,
+                "entries must reference the bounded session table");
   const uint8_t toggle_on[] = {1, 0, 2};
   const uint8_t toggle_off[] = {1, 0, 3};
   assert(guard.begin(nullptr, 1, 10, toggle_on, sizeof(toggle_on)) == InboundDecision::INVALID);
