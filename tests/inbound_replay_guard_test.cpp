@@ -83,5 +83,25 @@ int main() {
                        sizeof(toggle_on)) == InboundDecision::FULL);
   assert(pending.begin("sender", 17, 1, toggle_on,
                        sizeof(toggle_on)) == InboundDecision::DUPLICATE_PENDING);
+
+  // Compact metadata must still represent both public maximum lengths.
+  InboundReplayGuard<1> maximums;
+  uint8_t maximum_command[192]{};
+  uint8_t maximum_terminal[256]{};
+  maximum_command[191] = 0xA5;
+  maximum_terminal[255] = 0x5A;
+  assert(maximums.begin("sender", 99, 1, maximum_command,
+                        sizeof(maximum_command)) == InboundDecision::NEW_COMMAND);
+  assert(maximums.finish("sender", 99, 1, maximum_command,
+                         sizeof(maximum_command),
+                         {InboundTerminalStatus::SUCCEEDED, maximum_terminal,
+                          sizeof(maximum_terminal)}));
+  uint8_t maximum_replay[256]{};
+  replay_length = 0;
+  assert(maximums.get_terminal("sender", 99, 1, maximum_command,
+                               sizeof(maximum_command), status, maximum_replay,
+                               sizeof(maximum_replay), replay_length));
+  assert(replay_length == sizeof(maximum_terminal) &&
+         maximum_replay[255] == 0x5A);
   return 0;
 }

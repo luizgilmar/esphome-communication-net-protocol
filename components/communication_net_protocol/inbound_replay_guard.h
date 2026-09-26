@@ -99,7 +99,7 @@ class InboundReplayGuard {
     free_entry->session_index = static_cast<uint8_t>(session_index);
     free_entry->transaction_id = transaction_id;
     std::memcpy(free_entry->command, command, command_length);
-    free_entry->command_length = command_length;
+    free_entry->command_length = static_cast<uint8_t>(command_length);
     free_entry->sequence = ++sequence_;
     free_entry->occupied = true;
     return InboundDecision::NEW_COMMAND;
@@ -125,7 +125,7 @@ class InboundReplayGuard {
       entry.terminal_status = result.status;
       if (result.length != 0)
         std::memcpy(entry.terminal_data, result.data, result.length);
-      entry.terminal_length = result.length;
+      entry.terminal_length = static_cast<uint16_t>(result.length);
       entry.terminal = true;
       return true;
     }
@@ -184,15 +184,15 @@ class InboundReplayGuard {
  private:
   struct Entry {
     uint64_t transaction_id{0};
-    uint8_t command[MaxCommand]{};
-    size_t command_length{0};
+    uint32_t sequence{0};
     uint8_t terminal_data[MaxTerminal]{};
-    size_t terminal_length{0};
+    uint8_t command[MaxCommand]{};
+    uint16_t terminal_length{0};
+    uint8_t command_length{0};
     InboundTerminalStatus terminal_status{InboundTerminalStatus::FAILED};
     bool occupied{false};
     bool terminal{false};
     uint8_t session_index{0};
-    uint64_t sequence{0};
   };
 
   struct Session {
@@ -221,7 +221,9 @@ class InboundReplayGuard {
   // One compact watermark per sender session. Do not erase a watermark while
   // its boot ID can still be accepted by a transport adapter.
   Session sessions_[Capacity]{};
-  uint64_t sequence_{0};
+  // New commands are bounded by transport throughput; 32 bits provides more
+  // than a century of ordering even at one admitted command per second.
+  uint32_t sequence_{0};
 };
 
 }  // namespace communication_net_protocol

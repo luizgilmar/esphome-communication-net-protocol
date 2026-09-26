@@ -12,6 +12,12 @@ def test_replay_guard_is_transport_neutral_and_bounded():
     assert "clear_source_session" in source
     assert "std::memcmp(entry.command, command, command_length)" in source
     assert "terminal_data[MaxTerminal]" in source
+    assert "uint8_t command_length{0};" in source
+    assert "uint16_t terminal_length{0};" in source
+    assert "uint32_t sequence{0};" in source
+    assert "uint32_t sequence_{0};" in source
+    assert "size_t command_length{0};" not in source
+    assert "size_t terminal_length{0};" not in source
     assert "uint8_t session_index{0};" in source
     assert "find_session_index_" in source
     assert "get_terminal" in source
