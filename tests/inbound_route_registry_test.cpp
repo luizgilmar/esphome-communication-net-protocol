@@ -7,10 +7,12 @@ using esphome::communication_net_protocol::InboundRouteRegistry;
 
 int main() {
   InboundRouteRegistry<2> routes;
-  assert(routes.add("first", "light/one", "toggle"));
+  static const char first_id[] = "first";
+  assert(routes.add(first_id, "light/one", "toggle"));
   assert(routes.add("second", "cover/two", "open"));
   assert(routes.size() == 2);
   assert(std::strcmp(routes.find("light/one", "toggle"), "first") == 0);
+  assert(routes.find("light/one", "toggle") == first_id);
   assert(routes.find("light/one", "open") == nullptr);
   assert(routes.find(nullptr, "toggle") == nullptr);
   assert(!routes.add("third", "light/three", "toggle"));
@@ -36,4 +38,7 @@ int main() {
   assert(expanded.size() == 20);
   assert(std::strcmp(expanded.find("light/group", "br100"), "br100") == 0);
   assert(!expanded.add("overflow", "light/group", "overflow"));
+
+  static_assert(sizeof(InboundRouteRegistry<1>) <= 32,
+                "route declarations must store references, not text copies");
 }

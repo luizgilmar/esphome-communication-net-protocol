@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 
 namespace esphome {
@@ -21,10 +20,10 @@ template<size_t Capacity = 16> class InboundRouteRegistry {
         this->find(resource, command) != nullptr) return false;
     for (size_t i = 0; i < size_; ++i)
       if (std::strcmp(entries_[i].id, id) == 0) return false;
-    Entry &entry = entries_[size_++];
-    std::memcpy(entry.id, id, id_size + 1);
-    std::memcpy(entry.resource, resource, resource_size + 1);
-    std::memcpy(entry.command, command, command_size + 1);
+    // These values come from generated YAML string literals and therefore
+    // remain valid for the component lifetime.  Keep references instead of
+    // reserving three maximum-sized text buffers for every declared route.
+    entries_[size_++] = {id, resource, command};
     return true;
   }
 
@@ -46,9 +45,9 @@ template<size_t Capacity = 16> class InboundRouteRegistry {
     return count <= maximum ? count : 0;
   }
   struct Entry {
-    char id[32]{};
-    char resource[64]{};
-    char command[64]{};
+    const char *id{nullptr};
+    const char *resource{nullptr};
+    const char *command{nullptr};
   };
   Entry entries_[Capacity]{};
   size_t size_{0};

@@ -23,12 +23,19 @@ def test_route_declaration_supports_bounded_active_execution():
     assert 'binary sensor completion cannot use light options' in schema
     assert 'trigger.set_completion_timeout' in schema
     binding = (ROOT / "components/communication_net_protocol/declarative_inbound_binding.h").read_text()
+    registry = (ROOT / "components/communication_net_protocol/inbound_route_registry.h").read_text()
     assert 'class LightState;' in binding
     assert '#include "esphome/components/light/light_state.h"' not in binding
     assert 'this->route_admission_.admit(view, route)' in source
     assert 'this->route_admission_.complete(' in source
     assert 'sensor->has_state()' in source
     assert 'binary sensor state unavailable' in source
+    assert 'const char *id{nullptr};' in registry
+    assert 'const char *resource{nullptr};' in registry
+    assert 'const char *command{nullptr};' in registry
+    assert 'char id[32]' not in registry
+    assert 'char resource[64]' not in registry
+    assert 'char command[64]' not in registry
 
 
 def test_interruptible_inbound_is_opt_in_and_transaction_aware():
