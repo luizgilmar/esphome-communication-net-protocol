@@ -3,7 +3,9 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "mqtt_envelope_decoder.h"
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
 #include "mqtt_result_decoder.h"
+#endif
 #include <cstring>
 #include <cstdio>
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
@@ -719,6 +721,7 @@ void CommunicationNetProtocolComponent::loop() {
       ESP_LOGI(TAG, "MQTT command observation subscribed");
     return;
   }
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   if (this->mqtt_result_topic_ && !this->mqtt_result_subscription_registered_) {
     this->mqtt_result_subscription_registered_ =
         this->mqtt_wire_.subscribe(this->mqtt_result_topic_);
@@ -738,11 +741,13 @@ void CommunicationNetProtocolComponent::loop() {
     TransactionEvent event{};
     (void) this->transactions_.take_event(event);
   }
+#endif
   size_t payload_length = 0;
   if (this->mqtt_wire_.take_received(
           this->received_topic_, sizeof(this->received_topic_),
           this->received_payload_, sizeof(this->received_payload_),
           payload_length)) {
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
     if (this->mqtt_result_topic_ &&
         std::strcmp(this->received_topic_, this->mqtt_result_topic_) == 0) {
       MqttResultObservation result{};
@@ -777,6 +782,7 @@ void CommunicationNetProtocolComponent::loop() {
       }
       return;
     }
+#endif
     if (!this->mqtt_command_topic_ ||
         std::strcmp(this->received_topic_, this->mqtt_command_topic_) != 0) return;
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
@@ -785,6 +791,7 @@ void CommunicationNetProtocolComponent::loop() {
       return;
     }
 #endif
+#ifdef USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE
     ++this->observed_commands_;
     ESP_LOGD(TAG, "MQTT command observed bytes=%u count=%u (not executed)",
              static_cast<unsigned>(payload_length),
@@ -805,6 +812,7 @@ void CommunicationNetProtocolComponent::loop() {
       ESP_LOGD(TAG, "MQTT probe payload rejected count=%u (not executed)",
                static_cast<unsigned>(this->rejected_commands_));
     }
+#endif
   }
 #endif
 }
@@ -829,12 +837,19 @@ void CommunicationNetProtocolComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Inbound route declarations: 0 (dispatch disabled)");
 #endif
 #if defined(USE_MQTT) && defined(USE_COMMUNICATION_NET_MQTT_LISTENER)
+#ifdef USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE
   ESP_LOGCONFIG(TAG, "  MQTT command observation: %s",
                 this->mqtt_command_topic_ == nullptr ? "DISABLED" : "RECEIVE ONLY");
+#elif defined(USE_COMMUNICATION_NET_ACTIVE_GATE)
+  ESP_LOGCONFIG(TAG, "  MQTT command endpoint: %s",
+                this->mqtt_command_topic_ == nullptr ? "DISABLED" : "EXECUTOR");
+#endif
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   ESP_LOGCONFIG(TAG, "  MQTT result observation: %s",
                 this->mqtt_result_topic_ == nullptr ? "DISABLED" : "RECEIVE ONLY");
   ESP_LOGCONFIG(TAG, "  MQTT outgoing command observation: %s",
                 this->mqtt_outgoing_topic_ == nullptr ? "DISABLED" : "RECEIVE ONLY");
+#endif
 #endif
 }
 

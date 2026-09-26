@@ -532,6 +532,11 @@ async def to_code(config):
                                               mqtt_config[CONF_REPLY_TOPIC]))
     if mqtt_config and (mqtt_config[CONF_LISTEN_COMMANDS] or mqtt_config[CONF_LISTEN_RESULTS]):
         cg.add_define("USE_COMMUNICATION_NET_MQTT_LISTENER")
+    if (mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS] and
+            not mqtt_config[CONF_EXECUTE_INBOUND]):
+        cg.add_define("USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE")
+    if mqtt_config and mqtt_config[CONF_LISTEN_RESULTS]:
+        cg.add_define("USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER")
     if mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS]:
         command_topic = (
             f"{mqtt_config[CONF_COMMAND_PREFIX]}/{mqtt_config.get(CONF_COMMAND_TARGET, config[CONF_DEVICE_ID])}/command"

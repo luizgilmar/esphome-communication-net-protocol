@@ -1,7 +1,9 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
 #include "transaction_tracker.h"
+#endif
 #ifdef USE_COMMUNICATION_NET_INBOUND
 #ifndef COMMUNICATION_NET_INBOUND_CAPACITY
 #define COMMUNICATION_NET_INBOUND_CAPACITY 16
@@ -115,7 +117,9 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 #endif
 
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   TransactionTracker<4> &transactions() { return this->transactions_; }
+#endif
 #ifdef USE_COMMUNICATION_NET_INBOUND
   void add_inbound_route(const char *id, const char *resource,
                          const char *command) {
@@ -138,17 +142,23 @@ class CommunicationNetProtocolComponent : public Component
   void set_mqtt_command_topic(const char *topic) {
     this->mqtt_command_topic_ = topic;
   }
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   void set_mqtt_result_topic(const char *topic) { this->mqtt_result_topic_ = topic; }
   void set_mqtt_outgoing_topic(const char *topic) { this->mqtt_outgoing_topic_ = topic; }
   void set_mqtt_outgoing_target(const char *target) { this->mqtt_outgoing_target_ = target; }
+#endif
+#ifdef USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE
   uint32_t observed_commands() const { return this->observed_commands_; }
   uint32_t valid_commands() const { return this->valid_commands_; }
   uint32_t rejected_commands() const { return this->rejected_commands_; }
 #endif
+#endif
 
  protected:
   const char *device_id_{nullptr};
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   TransactionTracker<4> transactions_{};
+#endif
 #ifdef USE_COMMUNICATION_NET_INBOUND
   InboundRouteRegistry<COMMUNICATION_NET_INBOUND_CAPACITY> inbound_routes_{};
   bool inbound_routes_valid_{true};
@@ -205,16 +215,25 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 #if defined(USE_MQTT) && defined(USE_COMMUNICATION_NET_MQTT_LISTENER)
   const char *mqtt_command_topic_{nullptr};
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   const char *mqtt_result_topic_{nullptr};
   const char *mqtt_outgoing_topic_{nullptr};
   const char *mqtt_outgoing_target_{nullptr};
+#endif
   bool mqtt_command_subscription_registered_{false};
+#ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   bool mqtt_result_subscription_registered_{false};
   bool mqtt_outgoing_subscription_registered_{false};
+#endif
+#ifdef USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE
   uint32_t observed_commands_{0};
   uint32_t valid_commands_{0};
   uint32_t rejected_commands_{0};
+#endif
+#if defined(USE_COMMUNICATION_NET_MQTT_COMMAND_PROBE) || \
+    defined(USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER)
   uint8_t canonical_command_[192]{};
+#endif
   // Keep the bounded receive copy off the constrained loopTask stack.
   char received_topic_[MqttMailbox::MAX_TOPIC + 1]{};
   uint8_t received_payload_[MqttMailbox::MAX_PAYLOAD]{};
