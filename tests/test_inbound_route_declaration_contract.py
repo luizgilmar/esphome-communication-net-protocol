@@ -33,9 +33,13 @@ def test_route_declaration_supports_bounded_active_execution():
     assert 'const char *id{nullptr};' in registry
     assert 'const char *resource{nullptr};' in registry
     assert 'const char *command{nullptr};' in registry
+    assert 'size_t find_index(const char *resource, const char *command) const' in registry
     assert 'char id[32]' not in registry
     assert 'char resource[64]' not in registry
     assert 'char command[64]' not in registry
+    assert 'trigger.set_route_id' not in schema
+    assert 'declared_route_index < this->inbound_binding_count_' in source
+    assert '->route_id()' not in source
 
 
 def test_interruptible_inbound_is_opt_in_and_transaction_aware():

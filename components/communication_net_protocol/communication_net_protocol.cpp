@@ -103,16 +103,12 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
       command.transaction_id,
       {command.device_id.c_str(), command.resource.c_str(),
        command.name.c_str(), nullptr, 0}};
-  const char *declared_route = this->inbound_routes_.find(
+  const size_t declared_route_index = this->inbound_routes_.find_index(
       command.resource.c_str(), command.name.c_str());
-  DeclarativeInboundBinding *declared_binding = nullptr;
-  for (size_t i = 0; declared_route != nullptr &&
-                     i < this->inbound_binding_count_; ++i)
-    if (std::strcmp(this->inbound_bindings_[i]->route_id(),
-                    declared_route) == 0) {
-      declared_binding = this->inbound_bindings_[i];
-      break;
-    }
+  DeclarativeInboundBinding *declared_binding =
+      declared_route_index < this->inbound_binding_count_
+          ? this->inbound_bindings_[declared_route_index]
+          : nullptr;
   bool interrupt = false;
   if (this->inbound_active_ &&
       command.transaction_id != this->active_command_.transaction_id) {

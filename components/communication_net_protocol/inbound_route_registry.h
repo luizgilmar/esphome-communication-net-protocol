@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 namespace esphome {
@@ -28,11 +29,16 @@ template<size_t Capacity = 16> class InboundRouteRegistry {
   }
 
   const char *find(const char *resource, const char *command) const {
-    if (!resource || !command) return nullptr;
+    const size_t index = this->find_index(resource, command);
+    return index < size_ ? entries_[index].id : nullptr;
+  }
+
+  size_t find_index(const char *resource, const char *command) const {
+    if (!resource || !command) return Capacity;
     for (size_t i = 0; i < size_; ++i)
       if (std::strcmp(entries_[i].resource, resource) == 0 &&
-          std::strcmp(entries_[i].command, command) == 0) return entries_[i].id;
-    return nullptr;
+          std::strcmp(entries_[i].command, command) == 0) return i;
+    return Capacity;
   }
 
   size_t size() const { return size_; }
@@ -50,7 +56,7 @@ template<size_t Capacity = 16> class InboundRouteRegistry {
     const char *command{nullptr};
   };
   Entry entries_[Capacity]{};
-  size_t size_{0};
+  uint8_t size_{0};
 };
 
 }  // namespace communication_net_protocol

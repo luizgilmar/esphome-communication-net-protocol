@@ -471,7 +471,6 @@ async def to_code(config):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))
         trigger = cg.new_Pvariable(binding[CONF_TRIGGER_ID])
-        cg.add(trigger.set_route_id(binding[CONF_ID]))
         cg.add(trigger.set_interruptible(binding[CONF_INTERRUPTIBLE]))
         cg.add(trigger.set_interrupts_active(binding[CONF_INTERRUPTS_ACTIVE]))
         if CONF_COMPLETION in binding:

@@ -24,8 +24,6 @@ enum class CoverExpectedState : uint8_t { OPEN, CLOSED, IDLE };
 // A route and its local action, with optional light state completion.
 class DeclarativeInboundBinding : public Trigger<> {
  public:
-  void set_route_id(const char *route_id) { route_id_ = route_id; }
-  const char *route_id() const { return route_id_; }
   void set_light(light::LightState *state) {
     lights_[0] = state;
     light_count_ = state == nullptr ? 0 : 1;
@@ -111,29 +109,28 @@ class DeclarativeInboundBinding : public Trigger<> {
   bool interrupts_active() const { return interrupts_active_; }
 
  private:
-  const char *route_id_{nullptr};
   light::LightState *lights_[4]{};
-  size_t light_count_{0};
   light::LightState *toggle_references_[3]{};
-  size_t toggle_reference_count_{0};
-  LightExpectedState expected_{LightExpectedState::TOGGLED};
   binary_sensor::BinarySensor *sensor_{nullptr};
   cover::Cover *cover_{nullptr};
-  CoverExpectedState cover_expected_{CoverExpectedState::IDLE};
-  bool result_rgb_{false};
-  uint8_t expected_rgb_[3]{};
-  bool check_rgb_{false};
   light::LightState *rgb_lights_[3]{};
-  size_t rgb_light_count_{0};
-  uint8_t expected_brightness_{0};
-  bool check_brightness_{false};
   light::LightState *brightness_lights_[3]{};
-  size_t brightness_light_count_{0};
   const char *expected_effect_{nullptr};
   light::LightState *effect_lights_[3]{};
-  size_t effect_light_count_{0};
   uint32_t timeout_ms_{2000};
   uint32_t completion_delay_ms_{0};
+  uint8_t light_count_{0};
+  uint8_t toggle_reference_count_{0};
+  uint8_t rgb_light_count_{0};
+  uint8_t brightness_light_count_{0};
+  uint8_t effect_light_count_{0};
+  uint8_t expected_rgb_[3]{};
+  uint8_t expected_brightness_{0};
+  LightExpectedState expected_{LightExpectedState::TOGGLED};
+  CoverExpectedState cover_expected_{CoverExpectedState::IDLE};
+  bool result_rgb_{false};
+  bool check_rgb_{false};
+  bool check_brightness_{false};
   bool timer_completion_{false};
   bool interruptible_{false};
   bool interrupts_active_{false};

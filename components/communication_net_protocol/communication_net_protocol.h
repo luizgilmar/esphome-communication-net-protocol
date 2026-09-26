@@ -205,7 +205,7 @@ class CommunicationNetProtocolComponent : public Component
   void publish_inbound_result_();
 #endif
   DeclarativeInboundBinding *inbound_bindings_[COMMUNICATION_NET_INBOUND_CAPACITY]{};
-  size_t inbound_binding_count_{0};
+  uint8_t inbound_binding_count_{0};
 #endif
 #ifdef USE_MQTT
   MqttWireTransport mqtt_wire_{};
