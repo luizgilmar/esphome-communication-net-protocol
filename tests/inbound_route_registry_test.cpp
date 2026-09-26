@@ -17,6 +17,9 @@ int main() {
   assert(routes.find_index("light/one", "toggle") == 0);
   assert(routes.find_index("cover/two", "open") == 1);
   assert(routes.find_index("light/missing", "toggle") == 2);
+  assert(routes.id_at(0) == first_id);
+  assert(std::strcmp(routes.id_at(1), "second") == 0);
+  assert(routes.id_at(2) == nullptr);
   assert(routes.find(nullptr, "toggle") == nullptr);
   assert(!routes.add("third", "light/three", "toggle"));
 

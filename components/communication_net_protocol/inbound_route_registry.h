@@ -41,6 +41,10 @@ template<size_t Capacity = 16> class InboundRouteRegistry {
     return Capacity;
   }
 
+  const char *id_at(size_t index) const {
+    return index < size_ ? entries_[index].id : nullptr;
+  }
+
   size_t size() const { return size_; }
 
  private:

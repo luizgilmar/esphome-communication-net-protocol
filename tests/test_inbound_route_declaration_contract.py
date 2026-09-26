@@ -24,6 +24,7 @@ def test_route_declaration_supports_bounded_active_execution():
     assert 'trigger.set_completion_timeout' in schema
     binding = (ROOT / "components/communication_net_protocol/declarative_inbound_binding.h").read_text()
     registry = (ROOT / "components/communication_net_protocol/inbound_route_registry.h").read_text()
+    admission = (ROOT / "components/communication_net_protocol/route_admission.h").read_text()
     assert 'class LightState;' in binding
     assert '#include "esphome/components/light/light_state.h"' not in binding
     assert 'this->route_admission_.admit(view, route)' in source
@@ -34,6 +35,10 @@ def test_route_declaration_supports_bounded_active_execution():
     assert 'const char *resource{nullptr};' in registry
     assert 'const char *command{nullptr};' in registry
     assert 'size_t find_index(const char *resource, const char *command) const' in registry
+    assert 'const char *id_at(size_t index) const' in registry
+    assert 'ROUTED_COMMAND_MAX = 2 + MAX_ARGUMENTS' in admission
+    assert 'InboundReplayGuard<ReplayCapacity, 63, ROUTED_COMMAND_MAX>' in admission
+    assert 'view.intent.arguments_length > MAX_ARGUMENTS' in admission
     assert 'char id[32]' not in registry
     assert 'char resource[64]' not in registry
     assert 'char command[64]' not in registry
