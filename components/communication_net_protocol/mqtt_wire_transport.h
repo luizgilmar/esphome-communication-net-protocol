@@ -61,6 +61,11 @@ class MqttWireTransport {
     return mailbox_.take(topic, topic_capacity, payload, payload_capacity,
                          payload_length);
   }
+  bool peek_received(const char *&topic, const uint8_t *&payload,
+                     size_t &payload_length) const {
+    return this->mailbox_.peek(topic, payload, payload_length);
+  }
+  void release_received() { this->mailbox_.release(); }
   bool available() const {
 #ifdef USE_MQTT
     return mqtt::global_mqtt_client != nullptr &&

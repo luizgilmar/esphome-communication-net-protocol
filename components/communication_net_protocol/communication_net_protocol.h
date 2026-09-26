@@ -234,9 +234,6 @@ class CommunicationNetProtocolComponent : public Component
     defined(USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER)
   uint8_t canonical_command_[192]{};
 #endif
-  // Keep the bounded receive copy off the constrained loopTask stack.
-  char received_topic_[MqttMailbox::MAX_TOPIC + 1]{};
-  uint8_t received_payload_[MqttMailbox::MAX_PAYLOAD]{};
 #endif
 };
 

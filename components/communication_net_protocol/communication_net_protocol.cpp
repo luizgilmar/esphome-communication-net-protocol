@@ -742,16 +742,16 @@ void CommunicationNetProtocolComponent::loop() {
     (void) this->transactions_.take_event(event);
   }
 #endif
+  const char *received_topic = nullptr;
+  const uint8_t *received_payload = nullptr;
   size_t payload_length = 0;
-  if (this->mqtt_wire_.take_received(
-          this->received_topic_, sizeof(this->received_topic_),
-          this->received_payload_, sizeof(this->received_payload_),
-          payload_length)) {
+  if (this->mqtt_wire_.peek_received(received_topic, received_payload,
+                                     payload_length)) {
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
     if (this->mqtt_result_topic_ &&
-        std::strcmp(this->received_topic_, this->mqtt_result_topic_) == 0) {
+        std::strcmp(received_topic, this->mqtt_result_topic_) == 0) {
       MqttResultObservation result{};
-      if (!decode_mqtt_result(this->received_payload_, payload_length, result)) {
+      if (!decode_mqtt_result(received_payload, payload_length, result)) {
         ESP_LOGD(TAG, "MQTT result rejected bytes=%u (observation only)",
                  static_cast<unsigned>(payload_length));
       } else {
@@ -761,14 +761,15 @@ void CommunicationNetProtocolComponent::loop() {
                  static_cast<unsigned long long>(result.transaction_id),
                  static_cast<unsigned>(result.stage), static_cast<unsigned>(correlation));
       }
+      this->mqtt_wire_.release_received();
       return;
     }
     if (this->mqtt_outgoing_topic_ &&
-        std::strcmp(this->received_topic_, this->mqtt_outgoing_topic_) == 0) {
+        std::strcmp(received_topic, this->mqtt_outgoing_topic_) == 0) {
       MqttCommandIdentity identity{};
       size_t canonical_length = 0;
       if (decode_mqtt_command_envelope(
-              this->received_payload_, payload_length, this->mqtt_outgoing_target_,
+              received_payload, payload_length, this->mqtt_outgoing_target_,
               this->canonical_command_, sizeof(this->canonical_command_),
               canonical_length, &identity, this->device_id_, this->mqtt_result_topic_)) {
         const bool tracked = this->transactions_.begin(
@@ -780,14 +781,19 @@ void CommunicationNetProtocolComponent::loop() {
         ESP_LOGD(TAG, "MQTT outgoing command rejected bytes=%u (observation only)",
                  static_cast<unsigned>(payload_length));
       }
+      this->mqtt_wire_.release_received();
       return;
     }
 #endif
     if (!this->mqtt_command_topic_ ||
-        std::strcmp(this->received_topic_, this->mqtt_command_topic_) != 0) return;
+        std::strcmp(received_topic, this->mqtt_command_topic_) != 0) {
+      this->mqtt_wire_.release_received();
+      return;
+    }
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
     if (this->mqtt_execution_source_ != nullptr) {
-      this->receive_mqtt_inbound_(this->received_payload_, payload_length);
+      this->receive_mqtt_inbound_(received_payload, payload_length);
+      this->mqtt_wire_.release_received();
       return;
     }
 #endif
@@ -797,10 +803,10 @@ void CommunicationNetProtocolComponent::loop() {
              static_cast<unsigned>(payload_length),
              static_cast<unsigned>(this->observed_commands_));
     size_t canonical_length = 0;
-    if (decode_mqtt_command_envelope(this->received_payload_, payload_length,
+    if (decode_mqtt_command_envelope(received_payload, payload_length,
                                      this->device_id_, this->canonical_command_,
                                      sizeof(this->canonical_command_), canonical_length) ||
-        decode_mqtt_command_probe(this->received_payload_, payload_length,
+        decode_mqtt_command_probe(received_payload, payload_length,
                                   this->device_id_, this->canonical_command_,
                                   sizeof(this->canonical_command_), canonical_length)) {
       ++this->valid_commands_;
@@ -813,6 +819,7 @@ void CommunicationNetProtocolComponent::loop() {
                static_cast<unsigned>(this->rejected_commands_));
     }
 #endif
+    this->mqtt_wire_.release_received();
   }
 #endif
 }

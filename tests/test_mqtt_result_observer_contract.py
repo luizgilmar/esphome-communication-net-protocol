@@ -15,7 +15,7 @@ def test_result_observer_is_opt_in_bounded_and_receive_only():
     assert 'MAX_TOPIC = 192' in mailbox
     assert 'MAX_PAYLOAD = 1280' in mailbox
     assert 'listen_results: true' in bench
-    assert 'std::strcmp(this->received_topic_, this->mqtt_result_topic_) == 0' in source
+    assert 'std::strcmp(received_topic, this->mqtt_result_topic_) == 0' in source
     assert 'decode_mqtt_result' in source
     assert 'observe_result' in source
     assert 'observe_outgoing_target' in schema

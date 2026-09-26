@@ -36,6 +36,21 @@ def test_foundation_does_not_unconditionally_subscribe_or_publish():
     assert ".publish(" not in source[:start] + source[end:]
 
 
+def test_component_processes_the_wire_mailbox_without_a_second_payload_copy():
+    header = (COMPONENT / "communication_net_protocol.h").read_text(encoding="utf-8")
+    source = (COMPONENT / "communication_net_protocol.cpp").read_text(encoding="utf-8")
+    mailbox = (COMPONENT / "mqtt_mailbox.h").read_text(encoding="utf-8")
+    wire = (COMPONENT / "mqtt_wire_transport.h").read_text(encoding="utf-8")
+    assert "received_topic_[" not in header
+    assert "received_payload_[" not in header
+    assert "bool peek(" in mailbox
+    assert "void release()" in mailbox
+    assert "peek_received(" in wire
+    assert "release_received()" in wire
+    assert "this->mqtt_wire_.peek_received(" in source
+    assert "this->mqtt_wire_.release_received();" in source
+
+
 def test_mailbox_is_bounded_and_does_not_parse_in_callback():
     source = (COMPONENT / "mqtt_mailbox.h").read_text(encoding="utf-8")
     assert "MAX_TOPIC = 192" in source

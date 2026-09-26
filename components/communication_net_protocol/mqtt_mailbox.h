@@ -42,6 +42,17 @@ class MqttMailbox {
     return true;
   }
 
+  bool peek(const char *&topic, const uint8_t *&payload,
+            size_t &payload_length) const {
+    if (!occupied_) return false;
+    topic = topic_;
+    payload = payload_;
+    payload_length = payload_length_;
+    return true;
+  }
+
+  void release() { occupied_ = false; }
+
   bool occupied() const { return occupied_; }
   uint32_t dropped() const { return dropped_; }
 

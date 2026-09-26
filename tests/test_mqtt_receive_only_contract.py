@@ -20,7 +20,8 @@ def test_mqtt_observation_is_explicit_and_does_not_execute():
     assert 'len(command_topic.encode("utf-8")) > 192' in schema
     assert "listen_commands: true" in bench
     assert "mqtt_wire_.subscribe" in source
-    assert "mqtt_wire_.take_received" in source
+    assert "mqtt_wire_.peek_received" in source
+    assert "mqtt_wire_.release_received" in source
     assert "not executed" in source
     assert "command_gate_.admit" not in source
 
