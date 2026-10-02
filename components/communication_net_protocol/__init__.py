@@ -420,7 +420,16 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
+_RUNTIME_SCHEMA = CONFIG_SCHEMA
+CONFIG_SCHEMA = cv.Any(
+    cv.Schema({cv.Required("library_only"): cv.All(cv.boolean, cv.one_of(True))}),
+    _RUNTIME_SCHEMA,
+)
+
 async def to_code(config):
+    if config.get("library_only", False):
+        cg.add_define("USE_COMMUNICATION_NET_OUTBOUND")
+        return
     esp_now = config.get(CONF_ESP_NOW)
     mqtt_config = config.get(CONF_MQTT)
     interruptible_inbound = any(

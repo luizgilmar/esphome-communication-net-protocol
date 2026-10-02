@@ -127,7 +127,8 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
 #else
     return NetStart::BUSY;
 #endif
-  } else if (this->radio_result_ready_ || this->mqtt_result_ready_) {
+  } else if ((this->radio_result_ready_ || this->mqtt_result_ready_) &&
+             this->inbound_result_.transaction_id != command.transaction_id) {
     return NetStart::BUSY;
   }
   const char *route = nullptr;
@@ -171,7 +172,8 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
       interrupt && this->interrupt_active_ &&
       command.transaction_id == this->interrupt_command_.transaction_id) {
-    if (radio != this->interrupt_radio_waiting_) return NetStart::BUSY;
+    this->interrupt_radio_waiting_ |= radio;
+    this->interrupt_mqtt_waiting_ |= !radio;
     this->interrupt_result_ = {};
     this->interrupt_result_.transaction_id = command.transaction_id;
     this->interrupt_result_.status = NetStatus::IN_PROGRESS;
@@ -187,7 +189,8 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
 #endif
       this->inbound_active_ &&
       command.transaction_id == this->active_command_.transaction_id) {
-    if (radio != this->radio_waiting_) return NetStart::BUSY;
+    this->radio_waiting_ |= radio;
+    this->mqtt_waiting_ |= !radio;
     this->inbound_result_ = {};
     this->inbound_result_.transaction_id = command.transaction_id;
     this->inbound_result_.status = NetStatus::IN_PROGRESS;
@@ -290,9 +293,7 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
 
 void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-  if (this->interrupt_active_ && !this->interrupt_radio_result_ready_ &&
-      !this->interrupt_mqtt_result_ready_ &&
-      this->interrupt_binding_ != nullptr) {
+  if (this->interrupt_active_ && this->interrupt_binding_ != nullptr) {
     bool completed = this->interrupt_binding_->timer_completion() &&
         now_ms - this->interrupt_started_ms_ >=
             this->interrupt_binding_->completion_delay();
@@ -333,8 +334,9 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
     }
   }
 #endif
-  if (!this->inbound_active_ || this->radio_result_ready_ ||
-      this->mqtt_result_ready_ || this->active_binding_ == nullptr ||
+  // Delivery of an ACK must not gate local execution/completion. A terminal
+  // result can replace a pending ACK (including while MQTT is disconnected).
+  if (!this->inbound_active_ || this->active_binding_ == nullptr ||
       (this->active_binding_->light() == nullptr &&
        this->active_binding_->binary_sensor() == nullptr &&
        this->active_binding_->cover() == nullptr &&
