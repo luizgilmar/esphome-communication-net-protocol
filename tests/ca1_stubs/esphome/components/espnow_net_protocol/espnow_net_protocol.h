@@ -14,6 +14,7 @@ bool cancel_command(TransactionId){return true;}
 bool use_external_result_deadline(TransactionId){external=true;return true;}
 void set_verified_command_observer(NetCommandIdentityObserver*){}
 void set_command_handler(NetCommandHandler*){}
+void set_parallel_inbound(bool){}
 void set_interrupt_command_handler(NetCommandHandler*){}
 void set_interruptible_inbound(bool){}
 };

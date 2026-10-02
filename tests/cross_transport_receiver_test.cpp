@@ -7,7 +7,7 @@ using namespace espnow_net_protocol;
 struct Receiver: CommunicationNetProtocolComponent {
  using CommunicationNetProtocolComponent::start_inbound_;
  using CommunicationNetProtocolComponent::publish_inbound_result_;
- bool mqtt_ready()const{return mqtt_result_ready_;}
+ bool mqtt_ready()const{for(const auto &slot:executions_) if(slot.mqtt_result_ready_) return true; return false;}
 };
 NetCommand command(){NetCommand c;c.transaction_id=88;c.source_boot_id=42;c.timeout_ms=2000;
 c.source_device_id.assign("tx");c.device_id.assign("hub");c.resource.assign("light/spot");c.name.assign("toggle");c.payload.assign((const uint8_t*)"{}",2);return c;}

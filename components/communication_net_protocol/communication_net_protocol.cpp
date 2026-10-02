@@ -57,7 +57,57 @@ NetStart CommunicationNetProtocolComponent::start(const NetCommand &command,
   return this->start_inbound_(command, now_ms, true);
 }
 
+bool CommunicationNetProtocolComponent::execution_available_(const InboundExecution &slot) const {
+  return !slot.inbound_active_ && !slot.radio_result_ready_ && !slot.mqtt_result_ready_
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+      && !slot.interrupt_active_ && !slot.interrupt_radio_result_ready_ && !slot.interrupt_mqtt_result_ready_
+#endif
+      ;
+}
+
 NetStart CommunicationNetProtocolComponent::start_inbound_(
+    const NetCommand &command, uint32_t now_ms, bool radio) {
+  InboundExecution *selected = nullptr;
+  // Select an existing operation before a free slot, including duplicates
+  // arriving through the other transport. Admission validates the full key.
+  for (auto &slot : this->executions_) {
+    const bool same_key = slot.active_command_.transaction_id == command.transaction_id &&
+        slot.active_command_.source_boot_id == command.source_boot_id &&
+        std::strcmp(slot.active_command_.source_device_id.c_str(), command.source_device_id.c_str()) == 0;
+    if (!this->execution_available_(slot) && (same_key ||
+        (std::strcmp(slot.active_command_.device_id.c_str(), command.device_id.c_str()) == 0 &&
+         std::strcmp(slot.active_command_.resource.c_str(), command.resource.c_str()) == 0))) {
+      selected = &slot;
+      break;
+    }
+  }
+  if (selected == nullptr)
+    for (auto &slot : this->executions_)
+      if (this->execution_available_(slot)) { selected = &slot; break; }
+  if (selected == nullptr) return NetStart::BUSY;
+  if (this->execution_available_(*selected)) {
+    *selected = {};
+    selected->active_command_ = command;
+  }
+  ExecutionSelection guard(this->execution_, *selected);
+  return this->start_execution_(command, now_ms, radio);
+}
+
+void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
+  for (auto &slot : this->executions_) {
+    ExecutionSelection guard(this->execution_, slot);
+    this->loop_execution_(now_ms);
+  }
+}
+
+void CommunicationNetProtocolComponent::publish_inbound_result_() {
+  for (auto &slot : this->executions_) {
+    ExecutionSelection guard(this->execution_, slot);
+    this->publish_execution_result_();
+  }
+}
+
+NetStart CommunicationNetProtocolComponent::start_execution_(
     const NetCommand &command, uint32_t now_ms, bool radio) {
   if (!this->inbound_routes_valid_) return NetStart::BUSY;
   if (!command.valid() || (command.payload.size() != 0 &&
@@ -70,11 +120,11 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
       std::strcmp(command.resource.c_str(), "state/snapshot") == 0 &&
       std::strcmp(command.name.c_str(), "get") == 0;
   if (snapshot_query) {
-    if (this->inbound_active_ || this->radio_result_ready_ ||
-        this->mqtt_result_ready_
+    if (this->execution_->inbound_active_ || this->execution_->radio_result_ready_ ||
+        this->execution_->mqtt_result_ready_
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-        || this->interrupt_active_ || this->interrupt_radio_result_ready_ ||
-        this->interrupt_mqtt_result_ready_
+        || this->execution_->interrupt_active_ || this->execution_->interrupt_radio_result_ready_ ||
+        this->execution_->interrupt_mqtt_result_ready_
 #endif
         )
       return NetStart::BUSY;
@@ -88,9 +138,10 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
       result.error.code = espnow_net_protocol::NetErrorCode::PROTOCOL_ERROR;
       result.error.message.assign("state snapshot exceeds result payload");
     }
-    this->inbound_result_ = result;
-    this->radio_result_ready_ = radio;
-    this->mqtt_result_ready_ = !radio;
+    this->execution_->active_command_ = command;
+    this->execution_->inbound_result_ = result;
+    this->execution_->radio_result_ready_ = radio;
+    this->execution_->mqtt_result_ready_ = !radio;
     ESP_LOGI(TAG, "State snapshot query transport=%s tx=%llu result=%u",
              radio ? "esp_now" : "mqtt",
              static_cast<unsigned long long>(command.transaction_id),
@@ -110,25 +161,25 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
           ? this->inbound_bindings_[declared_route_index]
           : nullptr;
   bool interrupt = false;
-  if (this->inbound_active_ &&
-      command.transaction_id != this->active_command_.transaction_id) {
+  if (this->execution_->inbound_active_ &&
+      command.transaction_id != this->execution_->active_command_.transaction_id) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-    interrupt = this->active_binding_ != nullptr &&
-                this->active_binding_->interruptible() &&
+    interrupt = this->execution_->active_binding_ != nullptr &&
+                this->execution_->active_binding_->interruptible() &&
                 declared_binding != nullptr &&
                 declared_binding->interrupts_active() &&
                 this->command_matches_active_resource_(command);
-    const bool same_interrupt = this->interrupt_active_ &&
-        command.transaction_id == this->interrupt_command_.transaction_id;
-    if (!interrupt || (this->interrupt_active_ && !same_interrupt) ||
-        this->interrupt_radio_result_ready_ ||
-        this->interrupt_mqtt_result_ready_)
+    const bool same_interrupt = this->execution_->interrupt_active_ &&
+        command.transaction_id == this->execution_->interrupt_command_.transaction_id;
+    if (!interrupt || (this->execution_->interrupt_active_ && !same_interrupt) ||
+        (!same_interrupt && (this->execution_->interrupt_radio_result_ready_ ||
+                             this->execution_->interrupt_mqtt_result_ready_)))
       return NetStart::BUSY;
 #else
     return NetStart::BUSY;
 #endif
-  } else if ((this->radio_result_ready_ || this->mqtt_result_ready_) &&
-             this->inbound_result_.transaction_id != command.transaction_id) {
+  } else if ((this->execution_->radio_result_ready_ || this->execution_->mqtt_result_ready_) &&
+             this->execution_->inbound_result_.transaction_id != command.transaction_id) {
     return NetStart::BUSY;
   }
   const char *route = nullptr;
@@ -145,61 +196,61 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
     if (radio) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
       if (interrupt) {
-        if (this->interrupt_radio_result_ready_) return NetStart::BUSY;
-        this->interrupt_result_ = replay;
-        this->interrupt_radio_result_ready_ = true;
+        if (this->execution_->interrupt_radio_result_ready_) return NetStart::BUSY;
+        this->execution_->interrupt_result_ = replay;
+        this->execution_->interrupt_radio_result_ready_ = true;
         return NetStart::STARTED;
       }
 #endif
-      if (this->radio_result_ready_) return NetStart::BUSY;
-      this->inbound_result_ = replay;
-      this->radio_result_ready_ = true;
+      if (this->execution_->radio_result_ready_) return NetStart::BUSY;
+      this->execution_->inbound_result_ = replay;
+      this->execution_->radio_result_ready_ = true;
     } else {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
       if (interrupt) {
-        if (this->interrupt_mqtt_result_ready_) return NetStart::BUSY;
-        this->interrupt_result_ = replay;
-        this->interrupt_mqtt_result_ready_ = true;
+        if (this->execution_->interrupt_mqtt_result_ready_) return NetStart::BUSY;
+        this->execution_->interrupt_result_ = replay;
+        this->execution_->interrupt_mqtt_result_ready_ = true;
         return NetStart::STARTED;
       }
 #endif
-      this->inbound_result_ = replay;
-      this->mqtt_result_ready_ = true;
+      this->execution_->inbound_result_ = replay;
+      this->execution_->mqtt_result_ready_ = true;
     }
     return NetStart::STARTED;
   }
   if (decision == InboundDecision::DUPLICATE_PENDING &&
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-      interrupt && this->interrupt_active_ &&
-      command.transaction_id == this->interrupt_command_.transaction_id) {
-    this->interrupt_radio_waiting_ |= radio;
-    this->interrupt_mqtt_waiting_ |= !radio;
-    this->interrupt_result_ = {};
-    this->interrupt_result_.transaction_id = command.transaction_id;
-    this->interrupt_result_.status = NetStatus::IN_PROGRESS;
-    this->interrupt_result_.execution.started = true;
-    this->interrupt_result_.execution.has_estimated_completion = true;
-    this->interrupt_result_.execution.estimated_completion_ms =
-        this->interrupt_timeout_ms_;
-    if (radio) this->interrupt_radio_result_ready_ = true;
-    else this->interrupt_mqtt_result_ready_ = true;
+      interrupt && this->execution_->interrupt_active_ &&
+      command.transaction_id == this->execution_->interrupt_command_.transaction_id) {
+    this->execution_->interrupt_radio_waiting_ |= radio;
+    this->execution_->interrupt_mqtt_waiting_ |= !radio;
+    this->execution_->interrupt_result_ = {};
+    this->execution_->interrupt_result_.transaction_id = command.transaction_id;
+    this->execution_->interrupt_result_.status = NetStatus::IN_PROGRESS;
+    this->execution_->interrupt_result_.execution.started = true;
+    this->execution_->interrupt_result_.execution.has_estimated_completion = true;
+    this->execution_->interrupt_result_.execution.estimated_completion_ms =
+        this->execution_->interrupt_timeout_ms_;
+    if (radio) this->execution_->interrupt_radio_result_ready_ = true;
+    else this->execution_->interrupt_mqtt_result_ready_ = true;
     return NetStart::STARTED;
   }
   if (decision == InboundDecision::DUPLICATE_PENDING &&
 #endif
-      this->inbound_active_ &&
-      command.transaction_id == this->active_command_.transaction_id) {
-    this->radio_waiting_ |= radio;
-    this->mqtt_waiting_ |= !radio;
-    this->inbound_result_ = {};
-    this->inbound_result_.transaction_id = command.transaction_id;
-    this->inbound_result_.status = NetStatus::IN_PROGRESS;
-    this->inbound_result_.execution.started = true;
-    this->inbound_result_.execution.has_estimated_completion = true;
-    this->inbound_result_.execution.estimated_completion_ms =
-        this->inbound_timeout_ms_;
-    if (radio) this->radio_result_ready_ = true;
-    else this->mqtt_result_ready_ = true;
+      this->execution_->inbound_active_ &&
+      command.transaction_id == this->execution_->active_command_.transaction_id) {
+    this->execution_->radio_waiting_ |= radio;
+    this->execution_->mqtt_waiting_ |= !radio;
+    this->execution_->inbound_result_ = {};
+    this->execution_->inbound_result_.transaction_id = command.transaction_id;
+    this->execution_->inbound_result_.status = NetStatus::IN_PROGRESS;
+    this->execution_->inbound_result_.execution.started = true;
+    this->execution_->inbound_result_.execution.has_estimated_completion = true;
+    this->execution_->inbound_result_.execution.estimated_completion_ms =
+        this->execution_->inbound_timeout_ms_;
+    if (radio) this->execution_->radio_result_ready_ = true;
+    else this->execution_->mqtt_result_ready_ = true;
     return NetStart::STARTED;
   }
   if (decision != InboundDecision::NEW_COMMAND) return NetStart::REJECTED;
@@ -211,38 +262,38 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
   }
   if (interrupt) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-    this->interrupt_command_ = command;
-    this->interrupt_binding_ = binding;
-    this->interrupt_started_ms_ = now_ms;
-    this->interrupt_timeout_ms_ = binding->completion_timeout();
-    this->interrupt_radio_waiting_ = radio;
-    this->interrupt_mqtt_waiting_ = !radio;
-    this->interrupt_active_ = true;
+    this->execution_->interrupt_command_ = command;
+    this->execution_->interrupt_binding_ = binding;
+    this->execution_->interrupt_started_ms_ = now_ms;
+    this->execution_->interrupt_timeout_ms_ = binding->completion_timeout();
+    this->execution_->interrupt_radio_waiting_ = radio;
+    this->execution_->interrupt_mqtt_waiting_ = !radio;
+    this->execution_->interrupt_active_ = true;
     ESP_LOGI(TAG, "Inbound interrupt route=%s transport=%s tx=%llu active_tx=%llu",
              route, radio ? "esp_now" : "mqtt",
              static_cast<unsigned long long>(command.transaction_id),
-             static_cast<unsigned long long>(this->active_command_.transaction_id));
+             static_cast<unsigned long long>(this->execution_->active_command_.transaction_id));
     binding->trigger();
-    this->interrupt_result_ = {};
-    this->interrupt_result_.transaction_id = command.transaction_id;
-    this->interrupt_result_.status = NetStatus::IN_PROGRESS;
-    this->interrupt_result_.execution.started = true;
-    this->interrupt_result_.execution.has_estimated_completion = true;
-    this->interrupt_result_.execution.estimated_completion_ms =
+    this->execution_->interrupt_result_ = {};
+    this->execution_->interrupt_result_.transaction_id = command.transaction_id;
+    this->execution_->interrupt_result_.status = NetStatus::IN_PROGRESS;
+    this->execution_->interrupt_result_.execution.started = true;
+    this->execution_->interrupt_result_.execution.has_estimated_completion = true;
+    this->execution_->interrupt_result_.execution.estimated_completion_ms =
         binding->timer_completion() ? binding->completion_delay()
-                                    : this->interrupt_timeout_ms_;
-    if (radio) this->interrupt_radio_result_ready_ = true;
-    else this->interrupt_mqtt_result_ready_ = true;
+                                    : this->execution_->interrupt_timeout_ms_;
+    if (radio) this->execution_->interrupt_radio_result_ready_ = true;
+    else this->execution_->interrupt_mqtt_result_ready_ = true;
     return NetStart::STARTED;
 #endif
   }
-  this->active_command_ = command;
-  this->active_binding_ = binding;
-  this->inbound_started_ms_ = now_ms;
-  this->inbound_timeout_ms_ = binding->completion_timeout();
-  this->radio_waiting_ = radio;
-  this->mqtt_waiting_ = !radio;
-  this->inbound_active_ = true;
+  this->execution_->active_command_ = command;
+  this->execution_->active_binding_ = binding;
+  this->execution_->inbound_started_ms_ = now_ms;
+  this->execution_->inbound_timeout_ms_ = binding->completion_timeout();
+  this->execution_->radio_waiting_ = radio;
+  this->execution_->mqtt_waiting_ = !radio;
+  this->execution_->inbound_active_ = true;
   ESP_LOGI(TAG, "Inbound route=%s transport=%s tx=%llu",
            route, radio ? "esp_now" : "mqtt",
            static_cast<unsigned long long>(command.transaction_id));
@@ -250,7 +301,7 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
     bool on = binding->light()->current_values.is_on();
     for (size_t i = 0; i < binding->toggle_reference_count(); ++i)
       on |= binding->toggle_reference_at(i)->current_values.is_on();
-    this->inbound_expected_on_ =
+    this->execution_->inbound_expected_on_ =
         binding->expected() == LightExpectedState::ON ||
         (binding->expected() == LightExpectedState::TOGGLED && !on);
   } else if (binding->binary_sensor() != nullptr) {
@@ -264,7 +315,7 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
       this->finish_inbound_(unavailable);
       return NetStart::STARTED;
     }
-    this->inbound_expected_on_ =
+    this->execution_->inbound_expected_on_ =
         binding->expected() == LightExpectedState::ON ||
         (binding->expected() == LightExpectedState::TOGGLED && !sensor->state);
   }
@@ -278,39 +329,39 @@ NetStart CommunicationNetProtocolComponent::start_inbound_(
     immediate.execution.started = true;
     this->finish_inbound_(immediate);
   } else {
-    this->inbound_result_ = {};
-    this->inbound_result_.transaction_id = command.transaction_id;
-    this->inbound_result_.status = NetStatus::IN_PROGRESS;
-    this->inbound_result_.execution.started = true;
-    this->inbound_result_.execution.has_estimated_completion = true;
-    this->inbound_result_.execution.estimated_completion_ms =
-        this->inbound_timeout_ms_;
-    if (radio) this->radio_result_ready_ = true;
-    else this->mqtt_result_ready_ = true;
+    this->execution_->inbound_result_ = {};
+    this->execution_->inbound_result_.transaction_id = command.transaction_id;
+    this->execution_->inbound_result_.status = NetStatus::IN_PROGRESS;
+    this->execution_->inbound_result_.execution.started = true;
+    this->execution_->inbound_result_.execution.has_estimated_completion = true;
+    this->execution_->inbound_result_.execution.estimated_completion_ms =
+        this->execution_->inbound_timeout_ms_;
+    if (radio) this->execution_->radio_result_ready_ = true;
+    else this->execution_->mqtt_result_ready_ = true;
   }
   return NetStart::STARTED;
 }
 
-void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
+void CommunicationNetProtocolComponent::loop_execution_(uint32_t now_ms) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-  if (this->interrupt_active_ && this->interrupt_binding_ != nullptr) {
-    bool completed = this->interrupt_binding_->timer_completion() &&
-        now_ms - this->interrupt_started_ms_ >=
-            this->interrupt_binding_->completion_delay();
-    if (this->interrupt_binding_->cover() != nullptr) {
-      const auto *state = this->interrupt_binding_->cover();
+  if (this->execution_->interrupt_active_ && this->execution_->interrupt_binding_ != nullptr) {
+    bool completed = this->execution_->interrupt_binding_->timer_completion() &&
+        now_ms - this->execution_->interrupt_started_ms_ >=
+            this->execution_->interrupt_binding_->completion_delay();
+    if (this->execution_->interrupt_binding_->cover() != nullptr) {
+      const auto *state = this->execution_->interrupt_binding_->cover();
       completed = state->current_operation == cover::COVER_OPERATION_IDLE;
-      if (this->interrupt_binding_->cover_expected() == CoverExpectedState::OPEN)
+      if (this->execution_->interrupt_binding_->cover_expected() == CoverExpectedState::OPEN)
         completed &= state->position >= 0.99f;
-      else if (this->interrupt_binding_->cover_expected() == CoverExpectedState::CLOSED)
+      else if (this->execution_->interrupt_binding_->cover_expected() == CoverExpectedState::CLOSED)
         completed &= state->position <= 0.01f;
     }
-    const bool timed_out = now_ms - this->interrupt_started_ms_ >=
-                           this->interrupt_timeout_ms_;
+    const bool timed_out = now_ms - this->execution_->interrupt_started_ms_ >=
+                           this->execution_->interrupt_timeout_ms_;
     if (completed || timed_out) {
       NetResult result{};
-      result.transaction_id = this->interrupt_command_.transaction_id;
-      result.latency_ms = now_ms - this->interrupt_started_ms_;
+      result.transaction_id = this->execution_->interrupt_command_.transaction_id;
+      result.latency_ms = now_ms - this->execution_->interrupt_started_ms_;
       result.execution.started = true;
       if (completed) {
         result.status = NetStatus::SUCCEEDED;
@@ -320,10 +371,10 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
         result.error.message.assign("interrupt completion timed out");
       }
       this->finish_interrupt_(result);
-      if (completed && this->inbound_active_) {
+      if (completed && this->execution_->inbound_active_) {
         NetResult interrupted{};
-        interrupted.transaction_id = this->active_command_.transaction_id;
-        interrupted.latency_ms = now_ms - this->inbound_started_ms_;
+        interrupted.transaction_id = this->execution_->active_command_.transaction_id;
+        interrupted.latency_ms = now_ms - this->execution_->inbound_started_ms_;
         interrupted.status = NetStatus::FAILED;
         interrupted.execution.started = true;
         interrupted.error.code =
@@ -336,79 +387,79 @@ void CommunicationNetProtocolComponent::loop(uint32_t now_ms) {
 #endif
   // Delivery of an ACK must not gate local execution/completion. A terminal
   // result can replace a pending ACK (including while MQTT is disconnected).
-  if (!this->inbound_active_ || this->active_binding_ == nullptr ||
-      (this->active_binding_->light() == nullptr &&
-       this->active_binding_->binary_sensor() == nullptr &&
-       this->active_binding_->cover() == nullptr &&
-       !this->active_binding_->timer_completion())) return;
+  if (!this->execution_->inbound_active_ || this->execution_->active_binding_ == nullptr ||
+      (this->execution_->active_binding_->light() == nullptr &&
+       this->execution_->active_binding_->binary_sensor() == nullptr &&
+       this->execution_->active_binding_->cover() == nullptr &&
+       !this->execution_->active_binding_->timer_completion())) return;
   bool completed = false;
-  if (this->active_binding_->timer_completion()) {
-    completed = now_ms - this->inbound_started_ms_ >=
-                this->active_binding_->completion_delay();
-  } else if (this->active_binding_->cover() != nullptr) {
-    const auto *state = this->active_binding_->cover();
+  if (this->execution_->active_binding_->timer_completion()) {
+    completed = now_ms - this->execution_->inbound_started_ms_ >=
+                this->execution_->active_binding_->completion_delay();
+  } else if (this->execution_->active_binding_->cover() != nullptr) {
+    const auto *state = this->execution_->active_binding_->cover();
     completed = state->current_operation == cover::COVER_OPERATION_IDLE;
-    if (this->active_binding_->cover_expected() == CoverExpectedState::OPEN)
+    if (this->execution_->active_binding_->cover_expected() == CoverExpectedState::OPEN)
       completed &= state->position >= 0.99f;
-    else if (this->active_binding_->cover_expected() == CoverExpectedState::CLOSED)
+    else if (this->execution_->active_binding_->cover_expected() == CoverExpectedState::CLOSED)
       completed &= state->position <= 0.01f;
   } else {
-    completed = this->active_binding_->binary_sensor() == nullptr ||
-                (this->active_binding_->binary_sensor()->has_state() &&
-                 this->active_binding_->binary_sensor()->state ==
-                     this->inbound_expected_on_);
-    for (size_t i = 0; i < this->active_binding_->light_count(); ++i)
-      completed &= this->active_binding_->light_at(i)->current_values.is_on() ==
-                   this->inbound_expected_on_;
+    completed = this->execution_->active_binding_->binary_sensor() == nullptr ||
+                (this->execution_->active_binding_->binary_sensor()->has_state() &&
+                 this->execution_->active_binding_->binary_sensor()->state ==
+                     this->execution_->inbound_expected_on_);
+    for (size_t i = 0; i < this->execution_->active_binding_->light_count(); ++i)
+      completed &= this->execution_->active_binding_->light_at(i)->current_values.is_on() ==
+                   this->execution_->inbound_expected_on_;
   }
-  if (completed && this->active_binding_->check_rgb()) {
-    for (size_t i = 0; i < this->active_binding_->rgb_light_count(); ++i) {
-      const auto &values = this->active_binding_->rgb_light_at(i)->current_values;
+  if (completed && this->execution_->active_binding_->check_rgb()) {
+    for (size_t i = 0; i < this->execution_->active_binding_->rgb_light_count(); ++i) {
+      const auto &values = this->execution_->active_binding_->rgb_light_at(i)->current_values;
       const float observed[3]{values.get_red(), values.get_green(), values.get_blue()};
       for (size_t channel = 0; channel < 3; ++channel) {
         const int actual = static_cast<int>(observed[channel] * 255.0f + 0.5f);
-        const int expected = this->active_binding_->expected_rgb(channel);
+        const int expected = this->execution_->active_binding_->expected_rgb(channel);
         // One unit accounts for float-to-byte rounding in light color values.
         completed &= actual >= expected - 1 && actual <= expected + 1;
       }
     }
   }
-  if (completed && this->active_binding_->check_brightness()) {
-    const int expected = (this->active_binding_->expected_brightness() * 255 + 50) / 100;
-    for (size_t i = 0; i < this->active_binding_->brightness_light_count(); ++i) {
-      const auto &values = this->active_binding_->brightness_light_at(i)->current_values;
+  if (completed && this->execution_->active_binding_->check_brightness()) {
+    const int expected = (this->execution_->active_binding_->expected_brightness() * 255 + 50) / 100;
+    for (size_t i = 0; i < this->execution_->active_binding_->brightness_light_count(); ++i) {
+      const auto &values = this->execution_->active_binding_->brightness_light_at(i)->current_values;
       const int actual = static_cast<int>(values.get_brightness() * 255.0f + 0.5f);
       completed &= actual >= expected - 1 && actual <= expected + 1;
     }
   }
-  if (completed && this->active_binding_->expected_effect() != nullptr) {
-    for (size_t i = 0; i < this->active_binding_->effect_light_count(); ++i)
+  if (completed && this->execution_->active_binding_->expected_effect() != nullptr) {
+    for (size_t i = 0; i < this->execution_->active_binding_->effect_light_count(); ++i)
       completed &= std::strcmp(
-          this->active_binding_->effect_light_at(i)->get_effect_name().c_str(),
-          this->active_binding_->expected_effect()) == 0;
+          this->execution_->active_binding_->effect_light_at(i)->get_effect_name().c_str(),
+          this->execution_->active_binding_->expected_effect()) == 0;
   }
-  const bool timed_out = now_ms - this->inbound_started_ms_ >=
-                         this->inbound_timeout_ms_;
+  const bool timed_out = now_ms - this->execution_->inbound_started_ms_ >=
+                         this->execution_->inbound_timeout_ms_;
   if (!completed && !timed_out) return;
   NetResult result{};
-  result.transaction_id = this->active_command_.transaction_id;
-  result.latency_ms = now_ms - this->inbound_started_ms_;
+  result.transaction_id = this->execution_->active_command_.transaction_id;
+  result.latency_ms = now_ms - this->execution_->inbound_started_ms_;
   result.execution.started = true;
   if (completed) {
     result.status = NetStatus::SUCCEEDED;
     result.remote_state.completeness =
         espnow_net_protocol::NetStateCompleteness::COMPLETE;
-    const uint8_t state = (this->active_binding_->timer_completion() ||
-                           this->active_binding_->cover() != nullptr) ? 0 :
-                          this->active_binding_->binary_sensor() != nullptr
-                              ? (this->active_binding_->binary_sensor()->state ? 1 : 0)
-                              : (this->active_binding_->light()->current_values.is_on() ? 1 : 0);
-    if (this->active_binding_->timer_completion() ||
-        this->active_binding_->cover() != nullptr) {
+    const uint8_t state = (this->execution_->active_binding_->timer_completion() ||
+                           this->execution_->active_binding_->cover() != nullptr) ? 0 :
+                          this->execution_->active_binding_->binary_sensor() != nullptr
+                              ? (this->execution_->active_binding_->binary_sensor()->state ? 1 : 0)
+                              : (this->execution_->active_binding_->light()->current_values.is_on() ? 1 : 0);
+    if (this->execution_->active_binding_->timer_completion() ||
+        this->execution_->active_binding_->cover() != nullptr) {
       result.remote_state.completeness =
           espnow_net_protocol::NetStateCompleteness::NOT_PROVIDED;
-    } else if (this->active_binding_->result_rgb()) {
-      const auto &values = this->active_binding_->light()->current_values;
+    } else if (this->execution_->active_binding_->result_rgb()) {
+      const auto &values = this->execution_->active_binding_->light()->current_values;
       const uint8_t rgb[5]{state,
                            static_cast<uint8_t>(values.get_red() * 255.0f + 0.5f),
                            static_cast<uint8_t>(values.get_green() * 255.0f + 0.5f),
@@ -436,36 +487,36 @@ void CommunicationNetProtocolComponent::finish_inbound_(NetResult result) {
                             ? InboundTerminalStatus::SUCCEEDED
                             : InboundTerminalStatus::FAILED;
     const InboundCommandView view{
-        this->active_command_.source_device_id.c_str(),
-        this->active_command_.source_boot_id,
-        this->active_command_.transaction_id,
-        {this->active_command_.device_id.c_str(),
-         this->active_command_.resource.c_str(),
-         this->active_command_.name.c_str(), nullptr, 0}};
+        this->execution_->active_command_.source_device_id.c_str(),
+        this->execution_->active_command_.source_boot_id,
+        this->execution_->active_command_.transaction_id,
+        {this->execution_->active_command_.device_id.c_str(),
+         this->execution_->active_command_.resource.c_str(),
+         this->execution_->active_command_.name.c_str(), nullptr, 0}};
     (void) this->route_admission_.complete(
         view, {status, encoded.data.data(), encoded.data.size()});
   }
-  this->inbound_active_ = false;
-  this->active_binding_ = nullptr;
+  this->execution_->inbound_active_ = false;
+  this->execution_->active_binding_ = nullptr;
   ESP_LOGI(TAG, "Inbound completed tx=%llu result=%u",
            static_cast<unsigned long long>(result.transaction_id),
            static_cast<unsigned>(result.status));
-  this->inbound_result_ = result;
-  this->radio_result_ready_ = this->radio_waiting_;
-  this->mqtt_result_ready_ = this->mqtt_waiting_;
+  this->execution_->inbound_result_ = result;
+  this->execution_->radio_result_ready_ = this->execution_->radio_waiting_;
+  this->execution_->mqtt_result_ready_ = this->execution_->mqtt_waiting_;
 }
 
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
 bool CommunicationNetProtocolComponent::command_matches_active_resource_(
     const NetCommand &command) const {
-  return this->inbound_active_ &&
+  return this->execution_->inbound_active_ &&
       std::strcmp(command.source_device_id.c_str(),
-                  this->active_command_.source_device_id.c_str()) == 0 &&
-      command.source_boot_id == this->active_command_.source_boot_id &&
+                  this->execution_->active_command_.source_device_id.c_str()) == 0 &&
+      command.source_boot_id == this->execution_->active_command_.source_boot_id &&
       std::strcmp(command.device_id.c_str(),
-                  this->active_command_.device_id.c_str()) == 0 &&
+                  this->execution_->active_command_.device_id.c_str()) == 0 &&
       std::strcmp(command.resource.c_str(),
-                  this->active_command_.resource.c_str()) == 0;
+                  this->execution_->active_command_.resource.c_str()) == 0;
 }
 
 void CommunicationNetProtocolComponent::finish_interrupt_(NetResult result) {
@@ -475,79 +526,94 @@ void CommunicationNetProtocolComponent::finish_interrupt_(NetResult result) {
                             ? InboundTerminalStatus::SUCCEEDED
                             : InboundTerminalStatus::FAILED;
     const InboundCommandView view{
-        this->interrupt_command_.source_device_id.c_str(),
-        this->interrupt_command_.source_boot_id,
-        this->interrupt_command_.transaction_id,
-        {this->interrupt_command_.device_id.c_str(),
-         this->interrupt_command_.resource.c_str(),
-         this->interrupt_command_.name.c_str(), nullptr, 0}};
+        this->execution_->interrupt_command_.source_device_id.c_str(),
+        this->execution_->interrupt_command_.source_boot_id,
+        this->execution_->interrupt_command_.transaction_id,
+        {this->execution_->interrupt_command_.device_id.c_str(),
+         this->execution_->interrupt_command_.resource.c_str(),
+         this->execution_->interrupt_command_.name.c_str(), nullptr, 0}};
     (void) this->route_admission_.complete(
         view, {status, encoded.data.data(), encoded.data.size()});
   }
-  this->interrupt_active_ = false;
-  this->interrupt_binding_ = nullptr;
+  this->execution_->interrupt_active_ = false;
+  this->execution_->interrupt_binding_ = nullptr;
   ESP_LOGI(TAG, "Inbound interrupt completed tx=%llu result=%u",
            static_cast<unsigned long long>(result.transaction_id),
            static_cast<unsigned>(result.status));
-  this->interrupt_result_ = result;
-  this->interrupt_radio_result_ready_ = this->interrupt_radio_waiting_;
-  this->interrupt_mqtt_result_ready_ = this->interrupt_mqtt_waiting_;
+  this->execution_->interrupt_result_ = result;
+  this->execution_->interrupt_radio_result_ready_ = this->execution_->interrupt_radio_waiting_;
+  this->execution_->interrupt_mqtt_result_ready_ = this->execution_->interrupt_mqtt_waiting_;
 }
 #endif
+
+bool CommunicationNetProtocolComponent::has_result() const {
+  for (const auto &slot : this->executions_) {
+    if (slot.radio_result_ready_) return true;
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (slot.interrupt_radio_result_ready_) return true;
+#endif
+  }
+  return false;
+}
+
+bool CommunicationNetProtocolComponent::has_result(uint64_t id) const {
+  for (const auto &slot : this->executions_) {
+    if (slot.radio_result_ready_ && slot.inbound_result_.transaction_id == id) return true;
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (slot.interrupt_radio_result_ready_ && slot.interrupt_result_.transaction_id == id) return true;
+#endif
+  }
+  return false;
+}
 
 bool CommunicationNetProtocolComponent::take_result(NetResult &result) {
-  if (!this->radio_result_ready_) return false;
-  result = this->inbound_result_;
-  this->radio_result_ready_ = false;
-  if (result.status != NetStatus::IN_PROGRESS) this->radio_waiting_ = false;
-  return true;
-}
-
-bool CommunicationNetProtocolComponent::has_result(
-    uint64_t transaction_id) const {
-  if (this->radio_result_ready_ &&
-      this->inbound_result_.transaction_id == transaction_id) return true;
+  for (const auto &slot : this->executions_) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-  return this->interrupt_radio_result_ready_ &&
-         this->interrupt_result_.transaction_id == transaction_id;
-#else
-  return false;
+    if (slot.interrupt_radio_result_ready_)
+      return this->take_result(slot.interrupt_result_.transaction_id, result);
 #endif
-}
-
-bool CommunicationNetProtocolComponent::take_result(
-    uint64_t transaction_id, NetResult &result) {
-  if (this->radio_result_ready_ &&
-      this->inbound_result_.transaction_id == transaction_id)
-    return this->take_result(result);
-#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-  if (!this->interrupt_radio_result_ready_ ||
-      this->interrupt_result_.transaction_id != transaction_id) return false;
-  result = this->interrupt_result_;
-  this->interrupt_radio_result_ready_ = false;
-  if (result.status != NetStatus::IN_PROGRESS)
-    this->interrupt_radio_waiting_ = false;
-  return true;
-#else
-  return false;
-#endif
-}
-
-bool CommunicationNetProtocolComponent::cancel(uint64_t transaction_id) {
-#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
-  if (this->interrupt_active_ &&
-      this->interrupt_command_.transaction_id == transaction_id) {
-    this->interrupt_active_ = false;
-    this->interrupt_binding_ = nullptr;
-    return true;
+    if (slot.radio_result_ready_)
+      return this->take_result(slot.inbound_result_.transaction_id, result);
   }
+  return false;
+}
+
+bool CommunicationNetProtocolComponent::take_result(uint64_t id, NetResult &result) {
+  for (auto &slot : this->executions_) {
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (slot.interrupt_radio_result_ready_ && slot.interrupt_result_.transaction_id == id) {
+      result = slot.interrupt_result_;
+      slot.interrupt_radio_result_ready_ = false;
+      if (result.status != NetStatus::IN_PROGRESS) slot.interrupt_radio_waiting_ = false;
+      return true;
+    }
 #endif
-  if (!this->inbound_active_ ||
-      this->active_command_.transaction_id != transaction_id) return false;
-  // Execution might already have happened; leave this transaction reserved.
-  this->inbound_active_ = false;
-  this->active_binding_ = nullptr;
-  return true;
+    if (slot.radio_result_ready_ && slot.inbound_result_.transaction_id == id) {
+      result = slot.inbound_result_;
+      slot.radio_result_ready_ = false;
+      if (result.status != NetStatus::IN_PROGRESS) slot.radio_waiting_ = false;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool CommunicationNetProtocolComponent::cancel(uint64_t id) {
+  for (auto &slot : this->executions_) {
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (slot.interrupt_active_ && slot.interrupt_command_.transaction_id == id) {
+      slot.interrupt_active_ = false;
+      slot.interrupt_binding_ = nullptr;
+      return true;
+    }
+#endif
+    if (slot.inbound_active_ && slot.active_command_.transaction_id == id) {
+      slot.inbound_active_ = false;
+      slot.active_binding_ = nullptr;
+      return true;
+    }
+  }
+  return false;
 }
 
 void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
@@ -580,9 +646,12 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
         result, sizeof(result),
         "{\"transaction_id\":\"%llu\",\"result\":\"rejected\","
         "\"execution\":{\"started\":false},\"error\":{"
-        "\"code\":\"remote_rejected\",\"message\":\"command rejected by executor\","
-        "\"retryable\":false}}",
-        static_cast<unsigned long long>(fields.transaction_id));
+        "\"code\":\"%s\",\"message\":\"%s\","
+        "\"retryable\":%s}}",
+        static_cast<unsigned long long>(fields.transaction_id),
+        status == NetStart::BUSY ? "target_unavailable" : "remote_rejected",
+        status == NetStart::BUSY ? "command executor busy" : "command rejected by executor",
+        status == NetStart::BUSY ? "true" : "false");
     if (size > 0 && static_cast<size_t>(size) < sizeof(result))
       this->mqtt_wire_.publish(this->mqtt_execution_reply_,
                                reinterpret_cast<const uint8_t *>(result),
@@ -590,7 +659,7 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
   }
 }
 
-void CommunicationNetProtocolComponent::publish_inbound_result_() {
+void CommunicationNetProtocolComponent::publish_execution_result_() {
   if (this->mqtt_execution_reply_ == nullptr) return;
   NetResult *selected = nullptr;
   bool *ready = nullptr;
@@ -598,16 +667,16 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
   // Publish the stop response first; the interrupted operation follows on the
   // next cooperative loop iteration.
-  if (this->interrupt_mqtt_result_ready_) {
-    selected = &this->interrupt_result_;
-    ready = &this->interrupt_mqtt_result_ready_;
-    waiting = &this->interrupt_mqtt_waiting_;
+  if (this->execution_->interrupt_mqtt_result_ready_) {
+    selected = &this->execution_->interrupt_result_;
+    ready = &this->execution_->interrupt_mqtt_result_ready_;
+    waiting = &this->execution_->interrupt_mqtt_waiting_;
   } else
 #endif
-  if (this->mqtt_result_ready_) {
-    selected = &this->inbound_result_;
-    ready = &this->mqtt_result_ready_;
-    waiting = &this->mqtt_waiting_;
+  if (this->execution_->mqtt_result_ready_) {
+    selected = &this->execution_->inbound_result_;
+    ready = &this->execution_->mqtt_result_ready_;
+    waiting = &this->execution_->mqtt_waiting_;
   }
   if (selected == nullptr) return;
   const NetResult &result = *selected;
@@ -825,6 +894,7 @@ void CommunicationNetProtocolComponent::loop() {
 void CommunicationNetProtocolComponent::dump_config() {
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   ESP_LOGCONFIG(TAG, "Communication NetProtocol: inbound executor enabled");
+  ESP_LOGCONFIG(TAG, "  CC1 concurrent resource slots: %u", static_cast<unsigned>(INBOUND_EXECUTIONS));
 #else
   ESP_LOGCONFIG(TAG, "Communication NetProtocol: FOUNDATION ONLY (routing disabled)");
 #endif

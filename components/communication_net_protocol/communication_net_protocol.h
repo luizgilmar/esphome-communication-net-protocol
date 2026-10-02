@@ -61,20 +61,24 @@ class CommunicationNetProtocolComponent : public Component
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   void activate_inbound_executor(
       espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
-    if (endpoint != nullptr) endpoint->set_command_handler(this);
+    if (endpoint != nullptr) {
+      endpoint->set_command_handler(this);
+      endpoint->set_parallel_inbound(true);
+    }
   }
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
   void activate_interruptible_inbound_executor(
       espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
     if (endpoint == nullptr) return;
     endpoint->set_command_handler(this);
+    endpoint->set_parallel_inbound(true);
     endpoint->set_interruptible_inbound(true);
   }
 #endif
   espnow_net_protocol::NetCommandHandlerStartStatus start(
       const espnow_net_protocol::NetCommand &command, uint32_t now_ms) override;
   void loop(uint32_t now_ms) override;
-  bool has_result() const override { return radio_result_ready_; }
+  bool has_result() const override;
   bool take_result(espnow_net_protocol::NetResult &result) override;
   bool has_result(uint64_t transaction_id) const override;
   bool take_result(uint64_t transaction_id,
@@ -165,12 +169,15 @@ class CommunicationNetProtocolComponent : public Component
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   RouteAdmission<8, COMMUNICATION_NET_INBOUND_CAPACITY> route_admission_{nullptr, inbound_routes_};
   const espnow_net_protocol::NetCommand *verified_command_{nullptr};
-  espnow_net_protocol::NetCommand active_command_{};
-  espnow_net_protocol::NetResult inbound_result_{};
   espnow_net_protocol::EspNowResultCodec result_codec_{};
-  DeclarativeInboundBinding *active_binding_{nullptr};
   const char *mqtt_execution_source_{nullptr};
   const char *mqtt_execution_reply_{nullptr};
+  // Four independently tracked resources; each retains its ACK and terminal
+  // replies until consumed. MQTT and ESP-NOW share the same admission cache.
+  struct InboundExecution {
+  espnow_net_protocol::NetCommand active_command_{};
+  espnow_net_protocol::NetResult inbound_result_{};
+  DeclarativeInboundBinding *active_binding_{nullptr};
   uint32_t inbound_started_ms_{0};
   uint32_t inbound_timeout_ms_{0};
   bool inbound_expected_on_{false};
@@ -192,6 +199,22 @@ class CommunicationNetProtocolComponent : public Component
   bool interrupt_radio_result_ready_{false};
   bool interrupt_mqtt_result_ready_{false};
 #endif
+  };
+  static constexpr size_t INBOUND_EXECUTIONS = 4;
+  InboundExecution executions_[INBOUND_EXECUTIONS]{};
+  InboundExecution *execution_{&executions_[0]};
+  struct ExecutionSelection {
+    InboundExecution *&current;
+    InboundExecution *previous;
+    ExecutionSelection(InboundExecution *&current, InboundExecution &selected)
+        : current(current), previous(current) { current = &selected; }
+    ~ExecutionSelection() { current = previous; }
+  };
+  bool execution_available_(const InboundExecution &slot) const;
+  void loop_execution_(uint32_t now_ms);
+  void publish_execution_result_();
+  espnow_net_protocol::NetCommandHandlerStartStatus start_execution_(
+      const espnow_net_protocol::NetCommand &command, uint32_t now_ms, bool radio);
   espnow_net_protocol::NetCommandHandlerStartStatus start_inbound_(
       const espnow_net_protocol::NetCommand &command, uint32_t now_ms,
       bool radio);
