@@ -442,7 +442,6 @@ async def to_code(config):
             cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH")
     if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):
         cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
-        cg.add_define("USE_ESPNOW_NET_PROTOCOL_PARALLEL_INBOUND")
     if CONF_INBOUND in config:
         cg.add_define("USE_COMMUNICATION_NET_INBOUND")
         cg.add_define("COMMUNICATION_NET_INBOUND_CAPACITY",
