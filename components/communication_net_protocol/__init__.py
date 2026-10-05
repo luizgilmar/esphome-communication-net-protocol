@@ -8,9 +8,15 @@ from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
 
-# The inbound executor dereferences these ESPHome core types, including when
-# this configuration uses only delay-based completion with virtual actuators.
-AUTO_LOAD = ["light", "binary_sensor", "cover"]
+def AUTO_LOAD(config):
+    # Sharing command model headers must not pull actuator implementations into
+    # the transmitter. Delay-only inbound execution still dereferences these
+    # types in the compiled executor, so it needs their core implementations.
+    if config.get("library_only", False):
+        return []
+    if "inbound" in config or "state_snapshot" in config:
+        return ["light", "binary_sensor", "cover"]
+    return []
 
 CONF_DEVICE_ID = "device_id"
 CONF_MQTT = "mqtt"
