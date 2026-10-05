@@ -8,6 +8,10 @@ from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
 
+# The inbound executor dereferences these ESPHome core types, including when
+# this configuration uses only delay-based completion with virtual actuators.
+AUTO_LOAD = ["light", "binary_sensor", "cover"]
+
 CONF_DEVICE_ID = "device_id"
 CONF_MQTT = "mqtt"
 CONF_MQTT_ID = "mqtt_id"
@@ -258,6 +262,7 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
 }, single=True)
 
 INBOUND_SCHEMA = cv.Schema({
+    cv.Optional("normal_executions", default=1): cv.int_range(min=1, max=2),
     cv.Required(CONF_BINDINGS): cv.All(
         cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=32)
     ),
@@ -444,6 +449,10 @@ async def to_code(config):
         cg.add_define("USE_COMMUNICATION_NET_ACTIVE_GATE")
     if CONF_INBOUND in config:
         cg.add_define("USE_COMMUNICATION_NET_INBOUND")
+        cg.add_define("COMMUNICATION_NET_NORMAL_EXECUTIONS", config[CONF_INBOUND]["normal_executions"])
+        if (config[CONF_INBOUND]["normal_executions"] == 2 and esp_now
+                and esp_now[CONF_EXECUTE_INBOUND]):
+            cg.add_define("USE_ESPNOW_NET_PROTOCOL_PARALLEL_INBOUND")
         cg.add_define("COMMUNICATION_NET_INBOUND_CAPACITY",
                       len(config[CONF_INBOUND][CONF_BINDINGS]))
         if interruptible_inbound:
@@ -451,6 +460,7 @@ async def to_code(config):
             cg.add_define("USE_ESPNOW_NET_PROTOCOL_INTERRUPTIBLE_INBOUND")
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         cg.add_define("USE_COMMUNICATION_NET_ESPNOW_OBSERVER")
+        cg.add_define("USE_ESPNOW_NET_PROTOCOL_IDENTITY_OBSERVATION")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
@@ -529,6 +539,7 @@ async def to_code(config):
         await automation.build_automation(trigger, [], binding)
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
+        cg.add(protocol.set_observe_application_identity(True))
         cg.add(var.set_espnow_observation_source(protocol))
         if esp_now[CONF_EXECUTE_INBOUND]:
             if interruptible_inbound:

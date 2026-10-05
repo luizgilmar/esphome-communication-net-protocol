@@ -61,20 +61,27 @@ class CommunicationNetProtocolComponent : public Component
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   void activate_inbound_executor(
       espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
-    if (endpoint != nullptr) endpoint->set_command_handler(this);
+    if (endpoint == nullptr) return;
+    endpoint->set_command_handler(this);
+#ifdef USE_ESPNOW_NET_PROTOCOL_PARALLEL_INBOUND
+    endpoint->set_parallel_inbound(true);
+#endif
   }
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
   void activate_interruptible_inbound_executor(
       espnow_net_protocol::EspNowNetProtocolComponent *endpoint) {
     if (endpoint == nullptr) return;
     endpoint->set_command_handler(this);
+#ifdef USE_ESPNOW_NET_PROTOCOL_PARALLEL_INBOUND
+    endpoint->set_parallel_inbound(true);
+#endif
     endpoint->set_interruptible_inbound(true);
   }
 #endif
   espnow_net_protocol::NetCommandHandlerStartStatus start(
       const espnow_net_protocol::NetCommand &command, uint32_t now_ms) override;
   void loop(uint32_t now_ms) override;
-  bool has_result() const override { return radio_result_ready_; }
+  bool has_result() const override;
   bool take_result(espnow_net_protocol::NetResult &result) override;
   bool has_result(uint64_t transaction_id) const override;
   bool take_result(uint64_t transaction_id,
@@ -165,21 +172,46 @@ class CommunicationNetProtocolComponent : public Component
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   RouteAdmission<8, COMMUNICATION_NET_INBOUND_CAPACITY> route_admission_{nullptr, inbound_routes_};
   const espnow_net_protocol::NetCommand *verified_command_{nullptr};
-  espnow_net_protocol::NetCommand active_command_{};
-  espnow_net_protocol::NetResult inbound_result_{};
   espnow_net_protocol::EspNowResultCodec result_codec_{};
-  DeclarativeInboundBinding *active_binding_{nullptr};
   const char *mqtt_execution_source_{nullptr};
   const char *mqtt_execution_reply_{nullptr};
-  uint32_t inbound_started_ms_{0};
-  uint32_t inbound_timeout_ms_{0};
-  bool inbound_expected_on_{false};
-  bool inbound_active_{false};
-  bool radio_waiting_{false};
-  bool mqtt_waiting_{false};
-  bool radio_result_ready_{false};
-  bool mqtt_result_ready_{false};
+#ifndef COMMUNICATION_NET_NORMAL_EXECUTIONS
+#define COMMUNICATION_NET_NORMAL_EXECUTIONS 1
+#endif
+  static constexpr size_t NORMAL_EXECUTIONS = COMMUNICATION_NET_NORMAL_EXECUTIONS;
+  static_assert(NORMAL_EXECUTIONS >= 1 && NORMAL_EXECUTIONS <= 2,
+                "Only one or two normal executions are supported");
+  struct NormalExecution {
+    espnow_net_protocol::NetCommand active_command_{};
+    espnow_net_protocol::NetResult inbound_result_{};
+    DeclarativeInboundBinding *active_binding_{nullptr};
+    uint32_t inbound_started_ms_{0};
+    uint32_t inbound_timeout_ms_{0};
+    bool inbound_expected_on_{false};
+    bool inbound_active_{false};
+    bool radio_waiting_{false};
+    bool mqtt_waiting_{false};
+    bool radio_result_ready_{false};
+    bool mqtt_result_ready_{false};
+  };
+  NormalExecution normal_executions_[NORMAL_EXECUTIONS]{};
+  NormalExecution *normal_{&normal_executions_[0]};
+  struct SelectNormal {
+    NormalExecution *&current;
+    NormalExecution *previous;
+    SelectNormal(NormalExecution *&current, NormalExecution &selected)
+        : current(current), previous(current) { current = &selected; }
+    ~SelectNormal() { current = previous; }
+  };
+  bool normal_available_(const NormalExecution &slot) const;
+  espnow_net_protocol::NetCommandHandlerStartStatus start_normal_(
+      const espnow_net_protocol::NetCommand &command, uint32_t now_ms, bool radio);
+  void loop_normal_(uint32_t now_ms);
+  void publish_normal_result_();
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  // The STOP lane is shared, not multiplied per normal execution.
+  NormalExecution *interrupt_target_{nullptr};
+  void loop_interrupt_(uint32_t now_ms);
   espnow_net_protocol::NetCommand interrupt_command_{};
   espnow_net_protocol::NetResult interrupt_result_{};
   DeclarativeInboundBinding *interrupt_binding_{nullptr};
