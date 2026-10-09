@@ -1,0 +1,137 @@
+esphome:
+  name: nspanel-hub-schema-check
+  build_path: ../../hub-schema-build
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+wifi:
+  ssid: validation-only
+  password: validation-only-password
+mqtt:
+  id: check_mqtt
+  broker: 127.0.0.1
+external_components:
+  - source:
+      type: local
+      path: ../../esphome-wifi-espnow-arbitration/components
+    components: [wifi]
+  - source:
+      type: local
+      path: ../components
+    components: [communication_net_protocol]
+  - source:
+      type: local
+      path: ../../esphome-espnow-net-protocol/components
+    components: [espnow_net_protocol]
+espnow_net_protocol:
+  id: check_radio
+  channel: 1
+  pmk: '000102030405060708090A0B0C0D0E0F'
+  peers:
+    - id: check_panel
+      address: '24:D7:EB:0D:CF:00'
+      application_source_id: painel-gian-porta
+      lmk: '101112131415161718191A1B1C1D1E1F'
+output:
+  - platform: template
+    type: float
+    id: check_output
+    write_action: []
+light:
+  - platform: rgb
+    id: check_strip
+    red: check_output
+    green: check_output
+    blue: check_output
+cover:
+  - platform: template
+    id: check_cover
+    optimistic: true
+    has_position: true
+communication_net_protocol:
+  id: check_protocol
+  device_id: check_hub
+  mqtt:
+    mqtt_id: check_mqtt
+    listen_commands: true
+    execute_inbound: true
+    command_target: check_hub
+    source_id: tx-quartogian-integration
+    reply_topic: tx/results/tx-quartogian-integration
+    sources:
+      - source_id: painel-gian-porta
+        reply_topic: tx/results/painel-gian-porta
+  esp_now:
+    espnow_net_protocol_id: check_radio
+    observe_inbound: true
+    execute_inbound: true
+  inbound:
+    normal_executions: 2
+    bindings:
+      - id: check_toggle
+        resource: light/upper
+        command: toggle
+        then:
+          - light.toggle: check_strip
+        completion:
+          light_id: check_strip
+          expected: toggled
+      - id: check_rgb
+        resource: light/upper
+        command: rgb
+        arguments: {type: rgb}
+        then:
+          - light.turn_on:
+              id: check_strip
+              red: !lambda return red / 255.0f;
+              green: !lambda return green / 255.0f;
+              blue: !lambda return blue / 255.0f;
+        completion:
+          light_id: check_strip
+          expected: 'on'
+          rgb_from_arguments: true
+          rgb_light_ids: [check_strip]
+      - id: check_brightness
+        resource: light/upper
+        command: brightness
+        arguments: {type: value, min: 1, max: 100}
+        then:
+          - light.turn_on:
+              id: check_strip
+              brightness: !lambda return value / 100.0f;
+        completion:
+          light_id: check_strip
+          expected: 'on'
+          brightness_from_arguments: true
+          brightness_light_ids: [check_strip]
+      - id: check_position
+        resource: cover/blind
+        command: position
+        arguments: {type: value, min: 0, max: 100}
+        interruptible: true
+        then:
+          - cover.control:
+              id: check_cover
+              position: !lambda return value / 100.0f;
+        completion:
+          cover_id: check_cover
+          expected: position
+          timeout: 20s
+      - id: check_stop
+        resource: cover/blind
+        command: stop
+        interrupts_active: true
+        then:
+          - cover.stop: check_cover
+        completion:
+          cover_id: check_cover
+          expected: idle
+  policies:
+    - id: check_mqtt_policy
+      transports: [mqtt]
+  destinations:
+    - id: check_destination
+      policy: check_mqtt_policy
+      mqtt_target: check_hub

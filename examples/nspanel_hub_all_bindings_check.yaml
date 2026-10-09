@@ -1,0 +1,658 @@
+esphome:
+  name: nspanel-hub-all-bindings-check
+  build_path: ../../hub-schema-build
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+wifi:
+  ssid: validation-only
+  password: validation-only-password
+mqtt:
+  id: quartogian_mqtt
+  broker: 127.0.0.1
+external_components:
+- source:
+    type: local
+    path: ../../esphome-wifi-espnow-arbitration/components
+  components: [wifi]
+- source:
+    type: local
+    path: ../components
+  components: [communication_net_protocol]
+- source:
+    type: local
+    path: ../../esphome-espnow-net-protocol/components
+  components: [espnow_net_protocol]
+espnow_net_protocol:
+  id: espnow_network
+  channel: 1
+  pmk: '000102030405060708090A0B0C0D0E0F'
+  peers:
+  - id: check_panel
+    address: '24:D7:EB:0D:CF:00'
+    application_source_id: painel-gian-porta
+    lmk: '101112131415161718191A1B1C1D1E1F'
+output:
+- platform: template
+  type: float
+  id: check_output
+  write_action: []
+light:
+- {platform: rgb, id: FitaSuperior, red: check_output, green: check_output, blue: check_output,
+  &id001 effects: &id002 [{lambda: {name: Rainbow Effect With Custom Values, lambda: !lambda 'return;'}}]}
+- {platform: rgb, id: FitaMeio, red: check_output, green: check_output, blue: check_output,
+  *id001: *id002}
+- {platform: rgb, id: FitaMesa, red: check_output, green: check_output, blue: check_output}
+- {platform: monochromatic, id: SaidaLivre4, output: check_output}
+- {platform: monochromatic, id: SaidaLivre3, output: check_output}
+- {platform: monochromatic, id: SpotChuveiro, output: check_output}
+cover:
+- platform: template
+  id: persiana
+  optimistic: true
+  has_position: true
+communication_net_protocol:
+  id: command_probe
+  device_id: quartogian
+  state_snapshot:
+    topic: tx/status/quartogian/lights
+    qos: 1
+    interval: 500ms
+    fields:
+    - {field: spot, light_ids: [SpotChuveiro]}
+    - {field: strips, light_ids: [FitaSuperior, FitaMeio], rgb: true}
+    - {field: panel1, binary_sensor_id: panel_relay_1_state}
+    - {field: panel2, binary_sensor_id: panel_relay_2_state}
+  mqtt:
+    mqtt_id: quartogian_mqtt
+    command_prefix: tx/commands
+    listen_commands: true
+    execute_inbound: true
+    command_target: quartogian
+    source_id: tx-quartogian-integration
+    reply_topic: tx/results/tx-quartogian-integration
+    sources:
+    - source_id: painel-gian-porta
+      reply_topic: tx/results/painel-gian-porta
+  esp_now:
+    espnow_net_protocol_id: espnow_network
+    observe_inbound: true
+    execute_inbound: true
+  inbound:
+    normal_executions: 2
+    bindings:
+    - id: persiana_open
+      resource: cover/persiana
+      command: open
+      interruptible: true
+      then:
+      - cover.open: persiana
+      completion:
+        cover_id: persiana
+        expected: open
+        timeout: 20s
+    - id: persiana_close
+      resource: cover/persiana
+      command: close
+      interruptible: true
+      then:
+      - cover.close: persiana
+      completion:
+        cover_id: persiana
+        expected: closed
+        timeout: 20s
+    - id: persiana_stop
+      resource: cover/persiana
+      command: stop
+      interrupts_active: true
+      then:
+      - cover.stop: persiana
+      completion:
+        cover_id: persiana
+        expected: idle
+        timeout: 1s
+    - id: spot_toggle
+      resource: light/spot_chuveiro
+      command: toggle
+      then:
+      - light.toggle: SpotChuveiro
+      completion:
+        light_id: SpotChuveiro
+        expected: toggled
+        timeout: 2s
+    - id: panel_1_toggle
+      resource: light/painel_gian_porta_relay_1
+      command: toggle
+      then:
+      - homeassistant.action:
+          action: light.toggle
+          data:
+            entity_id: light.painel_gian_porta_relay_1
+      completion:
+        binary_sensor_id: panel_relay_1_state
+        expected: toggled
+        timeout: 3s
+    - id: strips_off
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: "off"
+      then:
+      - light.turn_off: FitaSuperior
+      - light.turn_off: FitaMeio
+      - delay: 1s
+      - if:
+          condition:
+            and:
+            - light.is_off: FitaSuperior
+            - light.is_off: FitaMeio
+            - light.is_off: FitaMesa
+          then:
+          - light.turn_off: SaidaLivre4
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio]
+        expected: "off"
+        timeout: 3s
+    - id: strips_activate
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: activate
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: FitaSuperior
+      - light.turn_on: FitaMeio
+      - wait_until:
+          condition:
+            and:
+            - light.is_on: FitaSuperior
+            - light.is_on: FitaMeio
+          timeout: 1500ms
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        timeout: 3s
+    - id: strips_reapply
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: reapply
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: FitaSuperior
+      - light.turn_on: FitaMeio
+      - wait_until:
+          condition:
+            and:
+            - light.is_on: FitaSuperior
+            - light.is_on: FitaMeio
+          timeout: 1500ms
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        timeout: 3s
+    - id: strips_deactivate
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: deactivate
+      then:
+      - light.turn_off: FitaSuperior
+      - light.turn_off: FitaMeio
+      - wait_until:
+          condition:
+            and:
+            - light.is_off: FitaSuperior
+            - light.is_off: FitaMeio
+          timeout: 1500ms
+      - if:
+          condition:
+            and:
+            - light.is_off: FitaSuperior
+            - light.is_off: FitaMeio
+            - light.is_off: FitaMesa
+          then:
+          - light.turn_off: SaidaLivre4
+      - delay: 50ms
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio]
+        expected: "off"
+        timeout: 3s
+    - id: strips_color_warm_white
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_warm_white
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 100%, green: 65%, blue: 30%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 100%, green: 65%, blue: 30%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 255, green: 166, blue: 77}
+        timeout: 3s
+    - id: strips_color_red
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_red
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 100%, green: 0%, blue: 0%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 100%, green: 0%, blue: 0%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 255, green: 0, blue: 0}
+        timeout: 3s
+    - id: strips_color_green
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_green
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 0%, green: 100%, blue: 0%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 0%, green: 100%, blue: 0%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 0, green: 255, blue: 0}
+        timeout: 3s
+    - id: strips_color_blue
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_blue
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 0%, green: 0%, blue: 100%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 0%, green: 0%, blue: 100%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 0, green: 0, blue: 255}
+        timeout: 3s
+    - id: strips_color_yellow
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_yellow
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 100%, green: 100%, blue: 0%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 100%, green: 100%, blue: 0%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 255, green: 255, blue: 0}
+        timeout: 3s
+    - id: strips_color_cyan
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_cyan
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 0%, green: 100%, blue: 100%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 0%, green: 100%, blue: 100%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 0, green: 255, blue: 255}
+        timeout: 3s
+    - id: strips_color_magenta
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: color_magenta
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, red: 100%, green: 0%, blue: 100%, effect: "None"}
+      - light.turn_on: {id: FitaMeio, red: 100%, green: 0%, blue: 100%, effect: "None"}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        rgb_light_ids: [FitaSuperior, FitaMeio]
+        rgb: {red: 255, green: 0, blue: 255}
+        timeout: 3s
+    - id: strips_brightness_12
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_12
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 12%}
+      - light.turn_on: {id: FitaMeio, brightness: 12%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 12
+        timeout: 3s
+    - id: strips_brightness_18
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_18
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 18%}
+      - light.turn_on: {id: FitaMeio, brightness: 18%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 18
+        timeout: 3s
+    - id: strips_brightness_27
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_27
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 27%}
+      - light.turn_on: {id: FitaMeio, brightness: 27%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 27
+        timeout: 3s
+    - id: strips_brightness_40
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_40
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 40%}
+      - light.turn_on: {id: FitaMeio, brightness: 40%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 40
+        timeout: 3s
+    - id: strips_brightness_65
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_65
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 65%}
+      - light.turn_on: {id: FitaMeio, brightness: 65%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 65
+        timeout: 3s
+    - id: strips_brightness_100
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness_100
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, brightness: 100%}
+      - light.turn_on: {id: FitaMeio, brightness: 100%}
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        brightness_light_ids: [FitaSuperior, FitaMeio]
+        brightness: 100
+        timeout: 3s
+    - id: strips_rainbow
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: rainbow
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on: {id: FitaSuperior, effect: Rainbow Effect With Custom Values}
+      - light.turn_on: {id: FitaMeio, effect: Rainbow Effect With Custom Values}
+      completion:
+        result_rgb: false
+        light_id: FitaSuperior
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: "on"
+        effect_light_ids: [FitaSuperior, FitaMeio]
+        effect: Rainbow Effect With Custom Values
+        timeout: 3s
+    - id: strips_toggle
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: toggle
+      then:
+      - if:
+          condition:
+            or:
+            - light.is_on: FitaSuperior
+            - light.is_on: FitaMeio
+          then:
+          - light.turn_off: FitaSuperior
+          - light.turn_off: FitaMeio
+          - wait_until:
+              condition:
+                and:
+                - light.is_off: FitaSuperior
+                - light.is_off: FitaMeio
+              timeout: 1500ms
+          - light.turn_off: SaidaLivre4
+          - delay: 50ms
+          else:
+          - light.turn_on: SaidaLivre4
+          - delay: 300ms
+          - light.turn_on: FitaSuperior
+          - light.turn_on: FitaMeio
+          - wait_until:
+              condition:
+                and:
+                - light.is_on: FitaSuperior
+                - light.is_on: FitaMeio
+              timeout: 1500ms
+      completion:
+        result_rgb: true
+        light_id: FitaSuperior
+        toggle_reference_light_ids: [FitaMeio]
+        additional_light_ids: [FitaMeio, SaidaLivre4]
+        expected: toggled
+        timeout: 3s
+    - id: nspanel_upper_toggle
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: toggle
+      then:
+      - if:
+          condition:
+            light.is_on: FitaSuperior
+          then:
+          - script.execute: nspanel_upper_off
+          - script.wait: nspanel_upper_off
+          else:
+          - script.execute: nspanel_upper_on
+          - script.wait: nspanel_upper_on
+      completion:
+        light_id: FitaSuperior
+        expected: toggled
+        result_rgb: true
+        timeout: 3s
+    - id: nspanel_upper_on
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: 'on'
+      then:
+      - script.execute: nspanel_upper_on
+      - script.wait: nspanel_upper_on
+      completion:
+        light_id: FitaSuperior
+        expected: 'on'
+        result_rgb: true
+        timeout: 3s
+    - id: nspanel_upper_off
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: 'off'
+      then:
+      - script.execute: nspanel_upper_off
+      - script.wait: nspanel_upper_off
+      completion:
+        light_id: FitaSuperior
+        expected: 'off'
+        result_rgb: true
+        timeout: 3s
+    - id: nspanel_upper_rgb
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: rgb
+      arguments: {type: rgb}
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on:
+          id: FitaSuperior
+          effect: None
+          red: !lambda 'return red / 255.0f;'
+          green: !lambda 'return green / 255.0f;'
+          blue: !lambda 'return blue / 255.0f;'
+      completion:
+        light_id: FitaSuperior
+        expected: 'on'
+        result_rgb: true
+        rgb_from_arguments: true
+        rgb_light_ids: [FitaSuperior]
+        timeout: 3s
+    - id: nspanel_upper_brightness
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: brightness
+      arguments: {type: value, min: 1, max: 100}
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - light.turn_on:
+          id: FitaSuperior
+          brightness: !lambda 'return value / 100.0f;'
+      completion:
+        light_id: FitaSuperior
+        expected: 'on'
+        result_rgb: true
+        brightness_from_arguments: true
+        brightness_light_ids: [FitaSuperior]
+        timeout: 3s
+    - id: nspanel_cover_position
+      resource: cover/persiana
+      command: position
+      arguments: {type: value, min: 0, max: 100}
+      interruptible: true
+      then:
+      - cover.control:
+          id: persiana
+          position: !lambda 'return value / 100.0f;'
+      completion:
+        cover_id: persiana
+        expected: position
+        timeout: 20s
+    - id: nspanel_cover_state
+      resource: cover/persiana
+      command: get
+      then: []
+      completion:
+        cover_id: persiana
+        expected: observed
+        timeout: 1s
+    - id: nspanel_upper_state
+      resource: light/fita_superior
+      execution_scope: light/alimentacao_fitas
+      command: get
+      then: []
+      completion:
+        light_id: FitaSuperior
+        expected: observed
+        result_rgb: true
+        timeout: 1s
+    - id: nspanel_bath_toggle
+      resource: light/banheiro_geral
+      command: toggle
+      then:
+      - light.toggle: SaidaLivre3
+      completion:
+        light_id: SaidaLivre3
+        expected: toggled
+        timeout: 2s
+  policies:
+  - id: probe_mqtt
+    transports: [mqtt]
+  destinations:
+  - id: probe
+    policy: probe_mqtt
+    mqtt_target: probe
+script:
+- id: nspanel_upper_on
+  mode: single
+  then:
+  - light.turn_on: SaidaLivre4
+  - delay: 300ms
+  - light.turn_on: FitaSuperior
+- id: nspanel_upper_off
+  mode: single
+  then:
+  - light.turn_off: FitaSuperior
+  - delay: 1s
+  - if:
+      condition:
+        and:
+        - light.is_off: FitaSuperior
+        - light.is_off: FitaMeio
+        - light.is_off: FitaMesa
+      then:
+      - light.turn_off: SaidaLivre4
+binary_sensor:
+- {platform: template, id: panel_relay_1_state}
+- {platform: template, id: panel_relay_2_state}
+api:

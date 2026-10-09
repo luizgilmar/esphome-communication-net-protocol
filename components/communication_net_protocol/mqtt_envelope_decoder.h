@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "canonical_command.h"
+#include "command_arguments.h"
 
 namespace esphome {
 namespace communication_net_protocol {
@@ -23,6 +24,8 @@ struct MqttCommandFields {
   uint64_t transaction_id{0};
   uint64_t source_boot_id{0};
   uint32_t timeout_ms{0};
+  uint8_t arguments_json[128]{};
+  size_t arguments_json_size{0};
 };
 
 // Receive-only compatibility decoder for the current cross-device MQTT wire
@@ -42,6 +45,9 @@ class MqttEnvelopeReader {
     if (identity) *identity = {};
     if (fields) *fields = {};
     timeout_ms_ = 0;
+    arguments_ = {};
+    arguments_start_ = 0;
+    arguments_size_ = 0;
     if (!payload_ || !expected_device || !canonical || length_ == 0 ||
         length_ > 1280 || !object_open_()) return false;
     unsigned seen = 0;
@@ -89,7 +95,7 @@ class MqttEnvelopeReader {
         std::strcmp(device, expected_device) != 0 ||
         (expected_source && std::strcmp(source_device, expected_source) != 0) ||
         (expected_reply && std::strcmp(reply_topic, expected_reply) != 0)) return false;
-    if (!encode_canonical_command({device, resource, action, nullptr, 0},
+    if (!encode_canonical_command({device, resource, action, arguments_.canonical, arguments_.canonical_size},
                                   canonical, capacity, written)) return false;
     if (identity) *identity = {transaction_id, source_boot_id};
     if (fields) {
@@ -101,6 +107,9 @@ class MqttEnvelopeReader {
       fields->transaction_id = transaction_id;
       fields->source_boot_id = source_boot_id;
       fields->timeout_ms = timeout_ms_;
+      fields->arguments_json_size = arguments_size_;
+      if (arguments_size_ != 0)
+        std::memcpy(fields->arguments_json, payload_ + arguments_start_, arguments_size_);
     }
     return true;
   }
@@ -153,9 +162,11 @@ class MqttEnvelopeReader {
         if (!string_(action, 64)) return false;
       } else if (std::strcmp(key, "payload") == 0) {
         bit = 2;
-        // An empty object has no arguments to omit from canonical identity.
-        // Nonempty payloads need normalization before they can be tracked.
-        if (!consume_('{') || !consume_('}')) return false;
+        space_();
+        arguments_start_ = pos_;
+        ArgumentReader reader(payload_ + pos_, length_ - pos_ > 128 ? 128 : length_ - pos_);
+        if (!reader.read(arguments_, arguments_size_)) return false;
+        pos_ += arguments_size_;
       } else return false;
       if (seen & bit) return false;
       seen |= bit;
@@ -224,6 +235,8 @@ class MqttEnvelopeReader {
   const uint8_t *payload_;
   size_t length_;
   size_t pos_{0};
+  CommandArguments arguments_{};
+  size_t arguments_start_{0}, arguments_size_{0};
   uint32_t timeout_ms_{0};
 };
 

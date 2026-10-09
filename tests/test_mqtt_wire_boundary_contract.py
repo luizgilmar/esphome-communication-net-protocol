@@ -32,7 +32,8 @@ def test_foundation_does_not_unconditionally_subscribe_or_publish():
     boundary = "\n#endif\n\nvoid CommunicationNetProtocolComponent::loop()"
     end = source.index(boundary, start) + len("\n#endif")
     active_executor = source[start:end]
-    assert "this->mqtt_wire_.publish(this->mqtt_execution_reply_" in active_executor
+    assert "this->mqtt_wire_.publish(reply_topic," in active_executor
+    assert "this->mqtt_sources_.reply_for(owner->source_device_id.c_str())" in active_executor
     assert ".publish(" not in source[:start] + source[end:]
 
 

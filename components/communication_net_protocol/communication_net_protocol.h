@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "mqtt_source_registry.h"
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
 #include "transaction_tracker.h"
 #endif
@@ -87,9 +88,11 @@ class CommunicationNetProtocolComponent : public Component
   bool take_result(uint64_t transaction_id,
                    espnow_net_protocol::NetResult &result) override;
   bool cancel(uint64_t transaction_id) override;
+  void add_mqtt_inbound_source(const char *source, const char *reply_topic) {
+    mqtt_sources_valid_ &= mqtt_sources_.add(source, reply_topic);
+  }
   void set_mqtt_inbound_execution(const char *source, const char *reply_topic) {
-    mqtt_execution_source_ = source;
-    mqtt_execution_reply_ = reply_topic;
+    this->add_mqtt_inbound_source(source, reply_topic);
   }
 #endif
   void setup() override {
@@ -173,8 +176,8 @@ class CommunicationNetProtocolComponent : public Component
   RouteAdmission<8, COMMUNICATION_NET_INBOUND_CAPACITY> route_admission_{nullptr, inbound_routes_};
   const espnow_net_protocol::NetCommand *verified_command_{nullptr};
   espnow_net_protocol::EspNowResultCodec result_codec_{};
-  const char *mqtt_execution_source_{nullptr};
-  const char *mqtt_execution_reply_{nullptr};
+  MqttSourceRegistry<8> mqtt_sources_{};
+  bool mqtt_sources_valid_{true};
 #ifndef COMMUNICATION_NET_NORMAL_EXECUTIONS
 #define COMMUNICATION_NET_NORMAL_EXECUTIONS 1
 #endif

@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "esphome/core/automation.h"
+#include "command_arguments.h"
 
 namespace esphome {
 namespace light {
@@ -18,12 +19,28 @@ class Cover;
 
 namespace communication_net_protocol {
 
-enum class LightExpectedState : uint8_t { ON, OFF, TOGGLED };
-enum class CoverExpectedState : uint8_t { OPEN, CLOSED, IDLE };
+enum class LightExpectedState : uint8_t { ON, OFF, TOGGLED, OBSERVED };
+enum class CoverExpectedState : uint8_t { OPEN, CLOSED, IDLE, POSITION, OBSERVED };
 
 // A route and its local action, with optional light state completion.
-class DeclarativeInboundBinding : public Trigger<> {
+class DeclarativeInboundBinding : public Trigger<uint16_t, uint8_t, uint8_t, uint8_t> {
  public:
+  void set_execution_scope(const char *scope) { execution_scope_ = scope; }
+  const char *execution_scope() const { return execution_scope_; }
+  void set_argument_kind(ArgumentKind kind) { argument_kind_ = kind; }
+  void set_argument_range(uint16_t minimum, uint16_t maximum) { argument_min_ = minimum; argument_max_ = maximum; }
+  bool accepts_arguments(const CommandArguments &args) const {
+    return args.kind == argument_kind_ && (args.kind != ArgumentKind::VALUE ||
+           (args.value >= argument_min_ && args.value <= argument_max_));
+  }
+  void set_rgb_from_arguments(bool enabled) { rgb_from_arguments_ = enabled; }
+  void set_brightness_from_arguments(bool enabled) { brightness_from_arguments_ = enabled; }
+  void apply_arguments(const CommandArguments &args) {
+    if (rgb_from_arguments_) set_expected_rgb(args.red, args.green, args.blue);
+    if (brightness_from_arguments_) set_expected_brightness(static_cast<uint8_t>(args.value));
+    expected_position_ = static_cast<float>(args.value) / 100.0f;
+  }
+  float expected_position() const { return expected_position_; }
   void set_light(light::LightState *state) {
     lights_[0] = state;
     light_count_ = state == nullptr ? 0 : 1;
@@ -109,6 +126,11 @@ class DeclarativeInboundBinding : public Trigger<> {
   bool interrupts_active() const { return interrupts_active_; }
 
  private:
+  const char *execution_scope_{nullptr};
+  ArgumentKind argument_kind_{ArgumentKind::NONE};
+  uint16_t argument_min_{0}, argument_max_{UINT16_MAX};
+  float expected_position_{0.0f};
+  bool rgb_from_arguments_{false}, brightness_from_arguments_{false};
   light::LightState *lights_[4]{};
   light::LightState *toggle_references_[3]{};
   binary_sensor::BinarySensor *sensor_{nullptr};
