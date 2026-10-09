@@ -2,11 +2,28 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome import automation
 from esphome.components import binary_sensor, cover, light
 from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
+
+def _validate_observer_peers(config):
+    observers=config.get("state_snapshot", {}).get("observers")
+    if not observers:
+        return config
+    radio=fv.full_config.get().get("espnow_net_protocol", {})
+    peers={peer["id"]: peer for peer in radio.get("peers", [])}
+    for observer in observers["peers"]:
+        peer=peers.get(observer["peer"])
+        if peer is None or peer.get("application_source_id") != observer["source"]:
+            raise cv.Invalid("observer peer/source must match radio application_source_id")
+        if "lmk" not in peer:
+            raise cv.Invalid("observer peers require encrypted ESP-NOW (lmk)")
+    return config
+
+FINAL_VALIDATE_SCHEMA = _validate_observer_peers
 
 def AUTO_LOAD(config):
     # Sharing command model headers must not pull actuator implementations into
@@ -336,6 +353,15 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
         cv.Optional(CONF_STARTUP_QUIET, default="5s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_STARTUP_SPREAD, default="30s"): cv.positive_time_period_milliseconds,
     }),
+    cv.Optional("observers"): cv.Schema({
+        cv.Required("peers"): cv.All(cv.ensure_list(cv.Schema({
+            cv.Required("peer"): _identifier(63, "observer peer"),
+            cv.Required("source"): _identifier(63, "observer source"),
+        })), cv.Length(min=1,max=8)),
+        cv.Optional("validity", default="60s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=30000),max=cv.TimePeriod(milliseconds=300000))),
+        cv.Optional("node_interval", default="1s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=500),max=cv.TimePeriod(milliseconds=10000))),
+        cv.Optional("peer_interval", default="2s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=1000),max=cv.TimePeriod(milliseconds=10000))),
+    }),
     cv.Required(CONF_FIELDS): cv.All(
         cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=4)
     ),
@@ -380,6 +406,14 @@ def _validate(config):
     if CONF_STATE_SNAPSHOT in config:
         if mqtt is None:
             raise cv.Invalid("state_snapshot requires mqtt")
+        observers=config[CONF_STATE_SNAPSHOT].get("observers")
+        if observers:
+            if not esp_now or not esp_now[CONF_EXECUTE_INBOUND]:
+                raise cv.Invalid("state_snapshot.observers requires active ESP-NOW execution")
+            if CONF_PUSH in config[CONF_STATE_SNAPSHOT]:
+                raise cv.Invalid("observers and legacy push cannot share background sender")
+            if len({p["peer"] for p in observers["peers"]}) != len(observers["peers"]):
+                raise cv.Invalid("observer peers must be unique")
         fields = [field[CONF_FIELD] for field in config[CONF_STATE_SNAPSHOT][CONF_FIELDS]]
         if len(set(fields)) != len(fields):
             raise cv.Invalid("state_snapshot fields must be unique")
@@ -535,6 +569,14 @@ async def to_code(config):
                 cg.add(var.add_snapshot_light_field(field[CONF_FIELD], field[CONF_RGB]))
                 for light_id in field[CONF_LIGHT_IDS]:
                     cg.add(var.add_snapshot_light(await cg.get_variable(light_id)))
+        if "observers" in snapshot:
+            observers=snapshot["observers"]
+            cg.add_define("USE_COMMUNICATION_NET_STATE_OBSERVERS")
+            protocol=await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
+            cg.add(var.configure_state_observers(protocol,observers["validity"].total_milliseconds,
+                observers["node_interval"].total_milliseconds,observers["peer_interval"].total_milliseconds))
+            for peer in observers["peers"]:
+                cg.add(var.add_state_observer(peer["peer"],peer["source"]))
         if CONF_PUSH in snapshot:
             push = snapshot[CONF_PUSH]
             protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])

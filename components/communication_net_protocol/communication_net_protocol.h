@@ -28,6 +28,9 @@
 #endif
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
 #include "light_state_snapshot.h"
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+#include "state_observation_server.h"
+#endif
 #endif
 
 namespace esphome {
@@ -164,6 +167,13 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 #endif
 
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  void configure_state_observers(espnow_net_protocol::EspNowNetProtocolComponent *radio,
+      uint32_t validity, uint32_t node_interval, uint32_t peer_interval) {
+    state_observers_.configure(radio,validity,node_interval,peer_interval);
+  }
+  void add_state_observer(const char *peer,const char *source) {state_observers_.add_peer(peer,source);}
+#endif
  protected:
   const char *device_id_{nullptr};
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
@@ -247,6 +257,10 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
   LightStateSnapshot state_snapshot_{};
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  StateObservationServer state_observers_{};
+  espnow_net_protocol::PeerIndex verified_peer_{espnow_net_protocol::INVALID_PEER_INDEX};
+#endif
 #endif
 #if defined(USE_MQTT) && defined(USE_COMMUNICATION_NET_MQTT_LISTENER)
   const char *mqtt_command_topic_{nullptr};

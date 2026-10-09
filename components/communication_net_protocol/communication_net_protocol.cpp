@@ -37,6 +37,9 @@ void CommunicationNetProtocolComponent::on_command_identity(
     const espnow_net_protocol::NetCommand &command) {
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   this->verified_command_ = &command;
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  this->verified_peer_ = peer;
+#endif
 #else
   uint8_t canonical[192]{};
   size_t length = 0;
@@ -160,7 +163,14 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
       std::strcmp(command.device_id.c_str(), this->device_id_) == 0 &&
       std::strcmp(command.resource.c_str(), "state/snapshot") == 0 &&
       std::strcmp(command.name.c_str(), "get") == 0;
-  if (snapshot_query) {
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  const bool observation_control = radio && state_observers_.configured() &&
+      this->device_id_ != nullptr && std::strcmp(command.device_id.c_str(),this->device_id_)==0 &&
+      std::strcmp(command.resource.c_str(),"state/observation/v1")==0;
+#else
+  const bool observation_control = false;
+#endif
+  if (snapshot_query || observation_control) {
     if (arguments.kind != ArgumentKind::NONE) return NetStart::INVALID_COMMAND;
     if (this->normal_->inbound_active_ || this->normal_->radio_result_ready_ ||
         this->normal_->mqtt_result_ready_
@@ -173,7 +183,13 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
     NetResult result{};
     result.transaction_id = command.transaction_id;
     result.execution.started = true;
-    if (this->state_snapshot_.write_remote_state(result.remote_state)) {
+    bool written=false;
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+    if(observation_control) written=state_observers_.control(verified_peer_,command,now_ms,state_snapshot_,result);
+    else
+#endif
+      written=this->state_snapshot_.write_remote_state(result.remote_state);
+    if (written) {
       result.status = NetStatus::SUCCEEDED;
     } else {
       result.status = NetStatus::FAILED;
@@ -847,6 +863,14 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
 void CommunicationNetProtocolComponent::loop() {
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
   this->state_snapshot_.loop(millis(), this->mqtt_wire_);
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  bool observation_idle=true;
+  for(const auto &slot:normal_executions_) observation_idle &= normal_available_(slot);
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  observation_idle &= !interrupt_active_ && !interrupt_radio_result_ready_ && !interrupt_mqtt_result_ready_;
+#endif
+  state_observers_.loop(millis(),state_snapshot_,observation_idle);
+#endif
 #endif
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   this->loop(millis());
