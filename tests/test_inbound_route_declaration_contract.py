@@ -8,11 +8,11 @@ def test_route_declaration_supports_bounded_active_execution():
     schema = (ROOT / "components/communication_net_protocol/__init__.py").read_text()
     source = (ROOT / "components/communication_net_protocol/communication_net_protocol.cpp").read_text()
     assert 'cv.Optional(CONF_INBOUND): INBOUND_SCHEMA' in schema
-    assert 'cv.Length(min=1, max=32)' in schema
+    assert 'cv.Length(min=1, max=40)' in schema
     assert 'duplicate inbound binding' in schema
     assert 'var.add_inbound_route' in schema
     assert 'automation.validate_automation' in schema
-    assert 'automation.build_automation(trigger, [], binding)' in schema
+    assert 'automation.build_automation(trigger, [(cg.uint16, "value")' in schema
     assert 'cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA' in schema
     assert 'cv.Optional(CONF_LIGHT_ID): cv.use_id(light.LightState)' in schema
     assert 'cv.Optional(CONF_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor)' in schema

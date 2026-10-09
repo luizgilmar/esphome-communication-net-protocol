@@ -2,11 +2,28 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome import automation
 from esphome.components import binary_sensor, cover, light
 from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@project-maintainers"]
+
+def _validate_observer_peers(config):
+    observers=config.get("state_snapshot", {}).get("observers")
+    if not observers:
+        return config
+    radio=fv.full_config.get().get("espnow_net_protocol", {})
+    peers={peer["id"]: peer for peer in radio.get("peers", [])}
+    for observer in observers["peers"]:
+        peer=peers.get(observer["peer"])
+        if peer is None or peer.get("application_source_id") != observer["source"]:
+            raise cv.Invalid("observer peer/source must match radio application_source_id")
+        if "lmk" not in peer:
+            raise cv.Invalid("observer peers require encrypted ESP-NOW (lmk)")
+    return config
+
+FINAL_VALIDATE_SCHEMA = _validate_observer_peers
 
 def AUTO_LOAD(config):
     # Sharing command model headers must not pull actuator implementations into
@@ -30,6 +47,7 @@ CONF_OBSERVE_INBOUND = "observe_inbound"
 CONF_EXECUTE_INBOUND = "execute_inbound"
 CONF_COMMAND_TARGET = "command_target"
 CONF_SOURCE_ID = "source_id"
+CONF_SOURCES = "sources"
 CONF_REPLY_TOPIC = "reply_topic"
 CONF_POLICIES = "policies"
 CONF_TRANSPORTS = "transports"
@@ -45,6 +63,9 @@ CONF_BINDINGS = "bindings"
 CONF_RESOURCE = "resource"
 CONF_COMMAND = "command"
 CONF_COMPLETION = "completion"
+CONF_ARGUMENTS = "arguments"
+CONF_RGB_FROM_ARGUMENTS = "rgb_from_arguments"
+CONF_BRIGHTNESS_FROM_ARGUMENTS = "brightness_from_arguments"
 CONF_EXPECTED = "expected"
 CONF_ADDITIONAL_LIGHT_IDS = "additional_light_ids"
 CONF_TOGGLE_REFERENCE_LIGHT_IDS = "toggle_reference_light_ids"
@@ -78,19 +99,24 @@ CommunicationNetProtocolComponent = communication_ns.class_(
     "CommunicationNetProtocolComponent", cg.Component
 )
 DeclarativeInboundBinding = communication_ns.class_(
-    "DeclarativeInboundBinding", automation.Trigger.template()
+    "DeclarativeInboundBinding", automation.Trigger.template(cg.uint16, cg.uint8, cg.uint8, cg.uint8)
 )
 LightExpectedState = communication_ns.enum("LightExpectedState", is_class=True)
 CoverExpectedState = communication_ns.enum("CoverExpectedState", is_class=True)
+ArgumentKind = communication_ns.enum("ArgumentKind", is_class=True)
+ARGUMENT_KINDS = {"none": ArgumentKind.NONE, "value": ArgumentKind.VALUE, "rgb": ArgumentKind.RGB}
 LIGHT_EXPECTED_STATES = {
     "on": LightExpectedState.ON,
     "off": LightExpectedState.OFF,
     "toggled": LightExpectedState.TOGGLED,
+    "observed": LightExpectedState.OBSERVED,
 }
 COVER_EXPECTED_STATES = {
     "open": CoverExpectedState.OPEN,
     "closed": CoverExpectedState.CLOSED,
     "idle": CoverExpectedState.IDLE,
+    "position": CoverExpectedState.POSITION,
+    "observed": CoverExpectedState.OBSERVED,
 }
 
 
@@ -145,6 +171,10 @@ MQTT_SCHEMA = cv.Schema({
     cv.Optional(CONF_COMMAND_TARGET): _topic_segment(63, "command_target"),
     cv.Optional(CONF_SOURCE_ID): _topic_segment(63, "source_id"),
     cv.Optional(CONF_REPLY_TOPIC): _prefix,
+    cv.Optional(CONF_SOURCES, default=[]): cv.All(cv.ensure_list(cv.Schema({
+        cv.Required(CONF_SOURCE_ID): _topic_segment(63, "source_id"),
+        cv.Required(CONF_REPLY_TOPIC): _prefix,
+    })), cv.Length(max=8)),
     cv.Optional(CONF_LISTEN_RESULTS, default=False): cv.boolean,
     cv.Optional(CONF_OBSERVE_OUTGOING_TARGET): _topic_segment(63, "observe_outgoing_target"),
     cv.Optional(CONF_COMMAND_PREFIX, default="tx/commands"): _prefix,
@@ -177,6 +207,8 @@ def _validate_light_completion(config):
     targets = sum(key in config for key in (
         CONF_LIGHT_ID, CONF_BINARY_SENSOR_ID, CONF_COVER_ID, CONF_DELAY
     ))
+    if CONF_LIGHT_ID not in config and (config.get(CONF_RGB_FROM_ARGUMENTS, False) or config.get(CONF_BRIGHTNESS_FROM_ARGUMENTS, False)):
+        raise cv.Invalid("argument light completion requires light_id")
     if targets != 1:
         raise cv.Invalid(
             "completion requires exactly one of light_id, binary_sensor_id, cover_id or delay"
@@ -206,16 +238,16 @@ def _validate_light_completion(config):
             raise cv.Invalid("cover completion cannot use light options")
     elif str(config.get(CONF_EXPECTED, "toggled")).lower() not in LIGHT_EXPECTED_STATES:
         raise cv.Invalid("light completion requires expected: on, off or toggled")
-    if (CONF_RGB in config) != (CONF_RGB_LIGHT_IDS in config):
+    if (CONF_RGB in config or config.get(CONF_RGB_FROM_ARGUMENTS, False)) != (CONF_RGB_LIGHT_IDS in config):
         raise cv.Invalid("rgb and rgb_light_ids must be configured together")
-    if (CONF_BRIGHTNESS in config) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
+    if (CONF_BRIGHTNESS in config or config.get(CONF_BRIGHTNESS_FROM_ARGUMENTS, False)) != (CONF_BRIGHTNESS_LIGHT_IDS in config):
         raise cv.Invalid("brightness and brightness_light_ids must be configured together")
     if (CONF_EFFECT in config) != (CONF_EFFECT_LIGHT_IDS in config):
         raise cv.Invalid("effect and effect_light_ids must be configured together")
     # Run before cv.enum converts the YAML string to a C++ enum expression.
-    if CONF_RGB in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
+    if (CONF_RGB in config or config.get(CONF_RGB_FROM_ARGUMENTS, False)) and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("RGB completion requires expected: on")
-    if CONF_BRIGHTNESS in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
+    if (CONF_BRIGHTNESS in config or config.get(CONF_BRIGHTNESS_FROM_ARGUMENTS, False)) and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("brightness completion requires expected: on")
     if CONF_EFFECT in config and str(config.get(CONF_EXPECTED, "toggled")).lower() != "on":
         raise cv.Invalid("effect completion requires expected: on")
@@ -234,7 +266,7 @@ LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
     cv.Optional(CONF_EXPECTED, default="toggled"): cv.one_of(
-        "on", "off", "toggled", "open", "closed", "idle", lower=True
+        "on", "off", "toggled", "open", "closed", "idle", "position", "observed", lower=True
     ),
     cv.Optional(CONF_TIMEOUT, default="2s"):
         cv.positive_time_period_milliseconds,
@@ -247,6 +279,8 @@ LIGHT_COMPLETION_SCHEMA = cv.All(_validate_light_completion, cv.Schema({
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
     ),
     cv.Optional(CONF_RESULT_RGB, default=False): cv.boolean,
+    cv.Optional(CONF_RGB_FROM_ARGUMENTS, default=False): cv.boolean,
+    cv.Optional(CONF_BRIGHTNESS_FROM_ARGUMENTS, default=False): cv.boolean,
     cv.Optional(CONF_BRIGHTNESS): cv.int_range(min=1, max=100),
     cv.Optional(CONF_BRIGHTNESS_LIGHT_IDS): cv.All(
         cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=3)
@@ -261,7 +295,13 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(DeclarativeInboundBinding),
     cv.Required(CONF_ID): _identifier(31, "inbound binding id"),
     cv.Required(CONF_RESOURCE): _identifier(63, "resource"),
+    cv.Optional("execution_scope"): _identifier(63, "execution_scope"),
     cv.Required(CONF_COMMAND): _identifier(63, "command"),
+    cv.Optional(CONF_ARGUMENTS, default={}): cv.Schema({
+        cv.Optional("type", default="none"): cv.one_of(*ARGUMENT_KINDS, lower=True),
+        cv.Optional("min", default=0): cv.int_range(min=0, max=65535),
+        cv.Optional("max", default=65535): cv.int_range(min=0, max=65535),
+    }),
     cv.Optional(CONF_INTERRUPTIBLE, default=False): cv.boolean,
     cv.Optional(CONF_INTERRUPTS_ACTIVE, default=False): cv.boolean,
     cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA,
@@ -270,7 +310,7 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
 INBOUND_SCHEMA = cv.Schema({
     cv.Optional("normal_executions", default=1): cv.int_range(min=1, max=2),
     cv.Required(CONF_BINDINGS): cv.All(
-        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=32)
+        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=40)
     ),
 })
 
@@ -313,6 +353,15 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
         cv.Optional(CONF_STARTUP_QUIET, default="5s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_STARTUP_SPREAD, default="30s"): cv.positive_time_period_milliseconds,
     }),
+    cv.Optional("observers"): cv.Schema({
+        cv.Required("peers"): cv.All(cv.ensure_list(cv.Schema({
+            cv.Required("peer"): _identifier(63, "observer peer"),
+            cv.Required("source"): _identifier(63, "observer source"),
+        })), cv.Length(min=1,max=8)),
+        cv.Optional("validity", default="60s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=30000),max=cv.TimePeriod(milliseconds=300000))),
+        cv.Optional("node_interval", default="1s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=500),max=cv.TimePeriod(milliseconds=10000))),
+        cv.Optional("peer_interval", default="2s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=1000),max=cv.TimePeriod(milliseconds=10000))),
+    }),
     cv.Required(CONF_FIELDS): cv.All(
         cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=4)
     ),
@@ -322,12 +371,27 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
 def _validate(config):
     esp_now = config.get(CONF_ESP_NOW)
     mqtt = config.get(CONF_MQTT)
+    if mqtt:
+        if (CONF_SOURCE_ID in mqtt) != (CONF_REPLY_TOPIC in mqtt):
+            raise cv.Invalid("source_id and reply_topic must be configured together")
+        sources = list(mqtt[CONF_SOURCES])
+        if CONF_SOURCE_ID in mqtt:
+            sources.append({CONF_SOURCE_ID: mqtt[CONF_SOURCE_ID], CONF_REPLY_TOPIC: mqtt[CONF_REPLY_TOPIC]})
+        if len(sources) > 8:
+            raise cv.Invalid("at most eight MQTT execution sources are supported")
+        if len({s[CONF_SOURCE_ID] for s in sources}) != len(sources):
+            raise cv.Invalid("MQTT execution source_id must be unique")
+        if len({s[CONF_REPLY_TOPIC] for s in sources}) != len(sources):
+            raise cv.Invalid("MQTT execution reply_topic must be unique")
+        if any('+' in s[CONF_REPLY_TOPIC] or '#' in s[CONF_REPLY_TOPIC] for s in sources):
+            raise cv.Invalid("execution reply topics must not contain wildcards")
     active = (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt and mqtt[CONF_EXECUTE_INBOUND])
     if active:
         if not esp_now or not mqtt or not mqtt[CONF_EXECUTE_INBOUND] or CONF_INBOUND not in config:
             raise cv.Invalid("execute_inbound currently requires MQTT, ESP-NOW and inbound.bindings")
         if mqtt and mqtt[CONF_EXECUTE_INBOUND] and (not mqtt[CONF_LISTEN_COMMANDS] or
-                CONF_SOURCE_ID not in mqtt or CONF_REPLY_TOPIC not in mqtt or
+                not (mqtt.get(CONF_SOURCES) or
+                     (CONF_SOURCE_ID in mqtt and CONF_REPLY_TOPIC in mqtt)) or
                 CONF_COMMAND_TARGET not in mqtt):
             raise cv.Invalid("MQTT execution requires listen_commands, command_target, source_id and reply_topic")
         if not esp_now[CONF_OBSERVE_INBOUND]:
@@ -342,6 +406,14 @@ def _validate(config):
     if CONF_STATE_SNAPSHOT in config:
         if mqtt is None:
             raise cv.Invalid("state_snapshot requires mqtt")
+        observers=config[CONF_STATE_SNAPSHOT].get("observers")
+        if observers:
+            if not esp_now or not esp_now[CONF_EXECUTE_INBOUND]:
+                raise cv.Invalid("state_snapshot.observers requires active ESP-NOW execution")
+            if CONF_PUSH in config[CONF_STATE_SNAPSHOT]:
+                raise cv.Invalid("observers and legacy push cannot share background sender")
+            if len({p["peer"] for p in observers["peers"]}) != len(observers["peers"]):
+                raise cv.Invalid("observer peers must be unique")
         fields = [field[CONF_FIELD] for field in config[CONF_STATE_SNAPSHOT][CONF_FIELDS]]
         if len(set(fields)) != len(fields):
             raise cv.Invalid("state_snapshot fields must be unique")
@@ -354,6 +426,21 @@ def _validate(config):
             name = binding[CONF_ID]
             route = (binding[CONF_RESOURCE], binding[CONF_COMMAND])
             completion = binding.get(CONF_COMPLETION, {})
+            arguments = binding[CONF_ARGUMENTS]
+            if arguments["min"] > arguments["max"]:
+                raise cv.Invalid(f"binding {name} arguments.min exceeds max")
+            if completion.get(CONF_RGB_FROM_ARGUMENTS, False) and arguments["type"] != "rgb":
+                raise cv.Invalid(f"binding {name} RGB completion requires rgb arguments")
+            if completion.get(CONF_BRIGHTNESS_FROM_ARGUMENTS, False) and (
+                    arguments["type"] != "value" or arguments["min"] < 1 or arguments["max"] > 100):
+                raise cv.Invalid(f"binding {name} brightness requires value arguments in 1..100")
+            if completion.get(CONF_EXPECTED) == "position" and (
+                    arguments["type"] != "value" or arguments["max"] > 100):
+                raise cv.Invalid(f"binding {name} position requires value arguments in 0..100")
+            if CONF_RGB in completion and completion.get(CONF_RGB_FROM_ARGUMENTS, False):
+                raise cv.Invalid(f"binding {name} cannot use static and argument RGB completion together")
+            if CONF_BRIGHTNESS in completion and completion.get(CONF_BRIGHTNESS_FROM_ARGUMENTS, False):
+                raise cv.Invalid(f"binding {name} cannot use static and argument brightness completion together")
             if name in names or route in routes:
                 raise cv.Invalid(f"duplicate inbound binding: {name} {route}")
             names.add(name)
@@ -482,6 +569,14 @@ async def to_code(config):
                 cg.add(var.add_snapshot_light_field(field[CONF_FIELD], field[CONF_RGB]))
                 for light_id in field[CONF_LIGHT_IDS]:
                     cg.add(var.add_snapshot_light(await cg.get_variable(light_id)))
+        if "observers" in snapshot:
+            observers=snapshot["observers"]
+            cg.add_define("USE_COMMUNICATION_NET_STATE_OBSERVERS")
+            protocol=await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
+            cg.add(var.configure_state_observers(protocol,observers["validity"].total_milliseconds,
+                observers["node_interval"].total_milliseconds,observers["peer_interval"].total_milliseconds))
+            for peer in observers["peers"]:
+                cg.add(var.add_state_observer(peer["peer"],peer["source"]))
         if CONF_PUSH in snapshot:
             push = snapshot[CONF_PUSH]
             protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
@@ -496,6 +591,10 @@ async def to_code(config):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))
         trigger = cg.new_Pvariable(binding[CONF_TRIGGER_ID])
+        arguments = binding[CONF_ARGUMENTS]
+        cg.add(trigger.set_execution_scope(binding.get("execution_scope", binding[CONF_RESOURCE])))
+        cg.add(trigger.set_argument_kind(ARGUMENT_KINDS[arguments["type"]]))
+        cg.add(trigger.set_argument_range(arguments["min"], arguments["max"]))
         cg.add(trigger.set_interruptible(binding[CONF_INTERRUPTIBLE]))
         cg.add(trigger.set_interrupts_active(binding[CONF_INTERRUPTS_ACTIVE]))
         if CONF_COMPLETION in binding:
@@ -524,6 +623,14 @@ async def to_code(config):
                 cg.add(trigger.set_expected(
                     LIGHT_EXPECTED_STATES[completion[CONF_EXPECTED]]))
             cg.add(trigger.set_result_rgb(completion[CONF_RESULT_RGB]))
+            cg.add(trigger.set_rgb_from_arguments(completion[CONF_RGB_FROM_ARGUMENTS]))
+            cg.add(trigger.set_brightness_from_arguments(completion[CONF_BRIGHTNESS_FROM_ARGUMENTS]))
+            if completion[CONF_RGB_FROM_ARGUMENTS]:
+                for light_id in completion[CONF_RGB_LIGHT_IDS]:
+                    cg.add(trigger.add_rgb_light(await cg.get_variable(light_id)))
+            if completion[CONF_BRIGHTNESS_FROM_ARGUMENTS]:
+                for light_id in completion[CONF_BRIGHTNESS_LIGHT_IDS]:
+                    cg.add(trigger.add_brightness_light(await cg.get_variable(light_id)))
             if CONF_RGB in completion:
                 rgb = completion[CONF_RGB]
                 cg.add(trigger.set_expected_rgb(rgb["red"], rgb["green"], rgb["blue"]))
@@ -542,7 +649,8 @@ async def to_code(config):
             cg.add(trigger.set_completion_timeout(
                 completion[CONF_TIMEOUT].total_milliseconds))
         cg.add(var.add_inbound_binding(trigger))
-        await automation.build_automation(trigger, [], binding)
+        await automation.build_automation(trigger, [(cg.uint16, "value"), (cg.uint8, "red"),
+                                                     (cg.uint8, "green"), (cg.uint8, "blue")], binding)
     if esp_now and esp_now[CONF_OBSERVE_INBOUND]:
         protocol = await cg.get_variable(esp_now[CONF_ESPNOW_NET_PROTOCOL_ID])
         cg.add(protocol.set_observe_application_identity(True))
@@ -553,8 +661,11 @@ async def to_code(config):
             else:
                 cg.add(var.activate_inbound_executor(protocol))
     if mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]:
-        cg.add(var.set_mqtt_inbound_execution(mqtt_config[CONF_SOURCE_ID],
-                                              mqtt_config[CONF_REPLY_TOPIC]))
+        if CONF_SOURCE_ID in mqtt_config:
+            cg.add(var.set_mqtt_inbound_execution(mqtt_config[CONF_SOURCE_ID],
+                                                  mqtt_config[CONF_REPLY_TOPIC]))
+        for source in mqtt_config[CONF_SOURCES]:
+            cg.add(var.add_mqtt_inbound_source(source[CONF_SOURCE_ID], source[CONF_REPLY_TOPIC]))
     if mqtt_config and (mqtt_config[CONF_LISTEN_COMMANDS] or mqtt_config[CONF_LISTEN_RESULTS]):
         cg.add_define("USE_COMMUNICATION_NET_MQTT_LISTENER")
     if (mqtt_config and mqtt_config[CONF_LISTEN_COMMANDS] and

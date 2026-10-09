@@ -78,7 +78,8 @@ int main() {
   std::string nonempty(live);
   nonempty.replace(nonempty.find("\"payload\":{}"), std::strlen("\"payload\":{}"),
                    "\"payload\":{\"value\":1}");
-  assert(!decode(nonempty.c_str(), first, length));
+  assert(decode(nonempty.c_str(), first, length));
+  assert(length != second_length || std::memcmp(first, second, length) != 0);
   std::string invalid_timeout(live);
   invalid_timeout.replace(invalid_timeout.find("\"timeout_ms\":2000"),
                           std::strlen("\"timeout_ms\":2000"), "\"timeout_ms\":0");

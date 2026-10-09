@@ -19,12 +19,27 @@ namespace communication_net_protocol {
 
 static const char *const TAG = "communication_net_protocol";
 
+#ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
+static bool write_cover_state(const cover::Cover *state, espnow_net_protocol::NetStateSnapshot &snapshot) {
+  if (state == nullptr || !(state->position >= 0.0f && state->position <= 1.0f)) return false;
+  const uint8_t values[2]{static_cast<uint8_t>(state->position * 100.0f + 0.5f),
+    static_cast<uint8_t>(state->current_operation == cover::COVER_OPERATION_OPENING ? 1 :
+                        state->current_operation == cover::COVER_OPERATION_CLOSING ? 2 : 0)};
+  snapshot.completeness = espnow_net_protocol::NetStateCompleteness::COMPLETE;
+  return snapshot.schema.assign("cover-state/v1") && snapshot.data.assign(values, sizeof(values));
+}
+#endif
+
+
 #ifdef USE_COMMUNICATION_NET_ESPNOW_OBSERVER
 void CommunicationNetProtocolComponent::on_command_identity(
     espnow_net_protocol::PeerIndex peer,
     const espnow_net_protocol::NetCommand &command) {
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   this->verified_command_ = &command;
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  this->verified_peer_ = peer;
+#endif
 #else
   uint8_t canonical[192]{};
   size_t length = 0;
@@ -68,6 +83,34 @@ bool CommunicationNetProtocolComponent::normal_available_(const NormalExecution 
 
 NetStart CommunicationNetProtocolComponent::start_inbound_(
     const NetCommand &command, uint32_t now_ms, bool radio) {
+  for (const auto &slot : this->normal_executions_) {
+    if (!this->normal_available_(slot) && slot.active_command_.transaction_id == command.transaction_id &&
+        (slot.active_command_.source_boot_id != command.source_boot_id ||
+         std::strcmp(slot.active_command_.source_device_id.c_str(), command.source_device_id.c_str()) != 0))
+      return NetStart::BUSY;
+  }
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  if ((this->interrupt_active_ || this->interrupt_radio_result_ready_ || this->interrupt_mqtt_result_ready_) &&
+      this->interrupt_command_.transaction_id == command.transaction_id &&
+      (this->interrupt_command_.source_boot_id != command.source_boot_id ||
+       std::strcmp(this->interrupt_command_.source_device_id.c_str(), command.source_device_id.c_str()) != 0))
+    return NetStart::BUSY;
+#endif
+  // Declarative execution scopes serialize different routes that share hardware.
+  // Same-resource replay and authorized STOP continue through the existing gate.
+  const size_t incoming_index = this->inbound_routes_.find_index(command.resource.c_str(), command.name.c_str());
+  const auto *incoming_binding = incoming_index < this->inbound_binding_count_ ? this->inbound_bindings_[incoming_index] : nullptr;
+  if (incoming_binding != nullptr && incoming_binding->execution_scope() != nullptr) {
+    for (const auto &slot : this->normal_executions_) {
+      if (this->normal_available_(slot) ||
+          std::strcmp(slot.active_command_.resource.c_str(), command.resource.c_str()) == 0) continue;
+      const size_t active_index = this->inbound_routes_.find_index(slot.active_command_.resource.c_str(), slot.active_command_.name.c_str());
+      const auto *active_binding = active_index < this->inbound_binding_count_ ? this->inbound_bindings_[active_index] : nullptr;
+      if (active_binding != nullptr && active_binding->execution_scope() != nullptr &&
+          std::strcmp(active_binding->execution_scope(), incoming_binding->execution_scope()) == 0)
+        return NetStart::BUSY;
+    }
+  }
   // Select by existing identity/resource before considering a free lane.
   // Do not construct or copy a large temporary execution on the task stack.
   NormalExecution *selected = nullptr;
@@ -111,16 +154,24 @@ void CommunicationNetProtocolComponent::publish_inbound_result_() {
 NetStart CommunicationNetProtocolComponent::start_normal_(
     const NetCommand &command, uint32_t now_ms, bool radio) {
   if (!this->inbound_routes_valid_) return NetStart::BUSY;
-  if (!command.valid() || (command.payload.size() != 0 &&
-      (command.payload.size() != 2 || command.payload.data()[0] != '{' ||
-       command.payload.data()[1] != '}'))) return NetStart::INVALID_COMMAND;
+  CommandArguments arguments{};
+  if (!command.valid() || !decode_command_arguments(command.payload.data(), command.payload.size(), arguments))
+    return NetStart::INVALID_COMMAND;
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
   const bool snapshot_query = this->state_snapshot_.configured() &&
       this->device_id_ != nullptr &&
       std::strcmp(command.device_id.c_str(), this->device_id_) == 0 &&
       std::strcmp(command.resource.c_str(), "state/snapshot") == 0 &&
       std::strcmp(command.name.c_str(), "get") == 0;
-  if (snapshot_query) {
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  const bool observation_control = radio && state_observers_.configured() &&
+      this->device_id_ != nullptr && std::strcmp(command.device_id.c_str(),this->device_id_)==0 &&
+      std::strcmp(command.resource.c_str(),"state/observation/v1")==0;
+#else
+  const bool observation_control = false;
+#endif
+  if (snapshot_query || observation_control) {
+    if (arguments.kind != ArgumentKind::NONE) return NetStart::INVALID_COMMAND;
     if (this->normal_->inbound_active_ || this->normal_->radio_result_ready_ ||
         this->normal_->mqtt_result_ready_
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
@@ -132,7 +183,13 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
     NetResult result{};
     result.transaction_id = command.transaction_id;
     result.execution.started = true;
-    if (this->state_snapshot_.write_remote_state(result.remote_state)) {
+    bool written=false;
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+    if(observation_control) written=state_observers_.control(verified_peer_,command,now_ms,state_snapshot_,result);
+    else
+#endif
+      written=this->state_snapshot_.write_remote_state(result.remote_state);
+    if (written) {
       result.status = NetStatus::SUCCEEDED;
     } else {
       result.status = NetStatus::FAILED;
@@ -154,13 +211,15 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
       command.source_device_id.c_str(), command.source_boot_id,
       command.transaction_id,
       {command.device_id.c_str(), command.resource.c_str(),
-       command.name.c_str(), nullptr, 0}};
+       command.name.c_str(), arguments.canonical, arguments.canonical_size}};
   const size_t declared_route_index = this->inbound_routes_.find_index(
       command.resource.c_str(), command.name.c_str());
   DeclarativeInboundBinding *declared_binding =
       declared_route_index < this->inbound_binding_count_
           ? this->inbound_bindings_[declared_route_index]
           : nullptr;
+  if (declared_binding != nullptr && !declared_binding->accepts_arguments(arguments))
+    return NetStart::INVALID_COMMAND;
   bool interrupt = false;
   if (this->normal_->inbound_active_ &&
       command.transaction_id != this->normal_->active_command_.transaction_id) {
@@ -197,6 +256,7 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
       if (interrupt) {
         if (this->interrupt_radio_result_ready_) return NetStart::BUSY;
+        this->interrupt_command_ = command;
         this->interrupt_result_ = replay;
         this->interrupt_radio_result_ready_ = true;
         return NetStart::STARTED;
@@ -210,6 +270,7 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
       if (interrupt) {
         if (this->interrupt_mqtt_result_ready_) return NetStart::BUSY;
+        this->interrupt_command_ = command;
         this->interrupt_result_ = replay;
         this->interrupt_mqtt_result_ready_ = true;
         return NetStart::STARTED;
@@ -276,7 +337,8 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
              route, radio ? "esp_now" : "mqtt",
              static_cast<unsigned long long>(command.transaction_id),
              static_cast<unsigned long long>(this->normal_->active_command_.transaction_id));
-    binding->trigger();
+    binding->apply_arguments(arguments);
+    binding->trigger(arguments.value, arguments.red, arguments.green, arguments.blue);
     this->interrupt_result_ = {};
     this->interrupt_result_.transaction_id = command.transaction_id;
     this->interrupt_result_.status = NetStatus::IN_PROGRESS;
@@ -322,7 +384,8 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
         binding->expected() == LightExpectedState::ON ||
         (binding->expected() == LightExpectedState::TOGGLED && !sensor->state);
   }
-  binding->trigger();
+  binding->apply_arguments(arguments);
+  binding->trigger(arguments.value, arguments.red, arguments.green, arguments.blue);
   if (binding->light() == nullptr && binding->binary_sensor() == nullptr &&
       binding->cover() == nullptr &&
       !binding->timer_completion()) {
@@ -368,6 +431,7 @@ void CommunicationNetProtocolComponent::loop_interrupt_(uint32_t now_ms) {
       result.execution.started = true;
       if (completed) {
         result.status = NetStatus::SUCCEEDED;
+        write_cover_state(this->interrupt_binding_->cover(), result.remote_state);
       } else {
         result.status = NetStatus::FAILED;
         result.error.code = espnow_net_protocol::NetErrorCode::TIMED_OUT;
@@ -404,19 +468,24 @@ void CommunicationNetProtocolComponent::loop_normal_(uint32_t now_ms) {
                 this->normal_->active_binding_->completion_delay();
   } else if (this->normal_->active_binding_->cover() != nullptr) {
     const auto *state = this->normal_->active_binding_->cover();
-    completed = state->current_operation == cover::COVER_OPERATION_IDLE;
+    completed = this->normal_->active_binding_->cover_expected() == CoverExpectedState::OBSERVED ||
+                state->current_operation == cover::COVER_OPERATION_IDLE;
     if (this->normal_->active_binding_->cover_expected() == CoverExpectedState::OPEN)
       completed &= state->position >= 0.99f;
     else if (this->normal_->active_binding_->cover_expected() == CoverExpectedState::CLOSED)
       completed &= state->position <= 0.01f;
+    else if (this->normal_->active_binding_->cover_expected() == CoverExpectedState::POSITION)
+      completed &= state->position >= this->normal_->active_binding_->expected_position() - 0.01f &&
+                   state->position <= this->normal_->active_binding_->expected_position() + 0.01f;
   } else {
     completed = this->normal_->active_binding_->binary_sensor() == nullptr ||
                 (this->normal_->active_binding_->binary_sensor()->has_state() &&
                  this->normal_->active_binding_->binary_sensor()->state ==
                      this->normal_->inbound_expected_on_);
-    for (size_t i = 0; i < this->normal_->active_binding_->light_count(); ++i)
-      completed &= this->normal_->active_binding_->light_at(i)->current_values.is_on() ==
-                   this->normal_->inbound_expected_on_;
+    if (this->normal_->active_binding_->expected() != LightExpectedState::OBSERVED)
+      for (size_t i = 0; i < this->normal_->active_binding_->light_count(); ++i)
+        completed &= this->normal_->active_binding_->light_at(i)->current_values.is_on() ==
+                     this->normal_->inbound_expected_on_;
   }
   if (completed && this->normal_->active_binding_->check_rgb()) {
     for (size_t i = 0; i < this->normal_->active_binding_->rgb_light_count(); ++i) {
@@ -460,10 +529,11 @@ void CommunicationNetProtocolComponent::loop_normal_(uint32_t now_ms) {
                           this->normal_->active_binding_->binary_sensor() != nullptr
                               ? (this->normal_->active_binding_->binary_sensor()->state ? 1 : 0)
                               : (this->normal_->active_binding_->light()->current_values.is_on() ? 1 : 0);
-    if (this->normal_->active_binding_->timer_completion() ||
-        this->normal_->active_binding_->cover() != nullptr) {
-      result.remote_state.completeness =
-          espnow_net_protocol::NetStateCompleteness::NOT_PROVIDED;
+    if (this->normal_->active_binding_->timer_completion()) {
+      result.remote_state.completeness = espnow_net_protocol::NetStateCompleteness::NOT_PROVIDED;
+    } else if (this->normal_->active_binding_->cover() != nullptr) {
+      if (!write_cover_state(this->normal_->active_binding_->cover(), result.remote_state))
+        result.remote_state.completeness = espnow_net_protocol::NetStateCompleteness::NOT_PROVIDED;
     } else if (this->normal_->active_binding_->result_rgb()) {
       const auto &values = this->normal_->active_binding_->light()->current_values;
       const uint8_t rgb[5]{state,
@@ -492,13 +562,15 @@ void CommunicationNetProtocolComponent::finish_inbound_(NetResult result) {
     const auto status = result.status == NetStatus::SUCCEEDED
                             ? InboundTerminalStatus::SUCCEEDED
                             : InboundTerminalStatus::FAILED;
+    CommandArguments arguments{};
+    if (!decode_command_arguments(this->normal_->active_command_.payload.data(), this->normal_->active_command_.payload.size(), arguments)) return;
     const InboundCommandView view{
         this->normal_->active_command_.source_device_id.c_str(),
         this->normal_->active_command_.source_boot_id,
         this->normal_->active_command_.transaction_id,
         {this->normal_->active_command_.device_id.c_str(),
          this->normal_->active_command_.resource.c_str(),
-         this->normal_->active_command_.name.c_str(), nullptr, 0}};
+         this->normal_->active_command_.name.c_str(), arguments.canonical, arguments.canonical_size}};
     (void) this->route_admission_.complete(
         view, {status, encoded.data.data(), encoded.data.size()});
   }
@@ -516,9 +588,6 @@ void CommunicationNetProtocolComponent::finish_inbound_(NetResult result) {
 bool CommunicationNetProtocolComponent::command_matches_active_resource_(
     const NetCommand &command) const {
   return this->normal_->inbound_active_ &&
-      std::strcmp(command.source_device_id.c_str(),
-                  this->normal_->active_command_.source_device_id.c_str()) == 0 &&
-      command.source_boot_id == this->normal_->active_command_.source_boot_id &&
       std::strcmp(command.device_id.c_str(),
                   this->normal_->active_command_.device_id.c_str()) == 0 &&
       std::strcmp(command.resource.c_str(),
@@ -531,13 +600,15 @@ void CommunicationNetProtocolComponent::finish_interrupt_(NetResult result) {
     const auto status = result.status == NetStatus::SUCCEEDED
                             ? InboundTerminalStatus::SUCCEEDED
                             : InboundTerminalStatus::FAILED;
+    CommandArguments arguments{};
+    if (!decode_command_arguments(this->interrupt_command_.payload.data(), this->interrupt_command_.payload.size(), arguments)) return;
     const InboundCommandView view{
         this->interrupt_command_.source_device_id.c_str(),
         this->interrupt_command_.source_boot_id,
         this->interrupt_command_.transaction_id,
         {this->interrupt_command_.device_id.c_str(),
          this->interrupt_command_.resource.c_str(),
-         this->interrupt_command_.name.c_str(), nullptr, 0}};
+         this->interrupt_command_.name.c_str(), arguments.canonical, arguments.canonical_size}};
     (void) this->route_admission_.complete(
         view, {status, encoded.data.data(), encoded.data.size()});
   }
@@ -624,8 +695,9 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
   MqttCommandFields fields{};
   if (!decode_mqtt_command_envelope(
           payload, length, this->device_id_, canonical, sizeof(canonical),
-          canonical_size, nullptr, this->mqtt_execution_source_,
-          this->mqtt_execution_reply_, &fields) ||
+          canonical_size, nullptr, nullptr, nullptr, &fields) ||
+      !this->mqtt_sources_valid_ ||
+      !this->mqtt_sources_.accepts(fields.source, fields.reply_topic) ||
       fields.source_boot_id == 0 || fields.timeout_ms == 0) {
     ESP_LOGW(TAG, "Inbound MQTT envelope rejected");
     return;
@@ -638,7 +710,7 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
       !command.device_id.assign(fields.device) ||
       !command.resource.assign(fields.resource) ||
       !command.name.assign(fields.action) ||
-      !command.payload.assign(reinterpret_cast<const uint8_t *>("{}"), 2))
+      !command.payload.assign(fields.arguments_json, fields.arguments_json_size))
     return;
   const NetStart status = this->start_inbound_(command, millis(), false);
   if (status != NetStart::STARTED) {
@@ -651,14 +723,15 @@ void CommunicationNetProtocolComponent::receive_mqtt_inbound_(
         "\"retryable\":false}}",
         static_cast<unsigned long long>(fields.transaction_id));
     if (size > 0 && static_cast<size_t>(size) < sizeof(result))
-      this->mqtt_wire_.publish(this->mqtt_execution_reply_,
+      this->mqtt_wire_.publish(this->mqtt_sources_.reply_for(fields.source),
                                reinterpret_cast<const uint8_t *>(result),
                                static_cast<size_t>(size));
   }
 }
 
 void CommunicationNetProtocolComponent::publish_normal_result_() {
-  if (this->mqtt_execution_reply_ == nullptr) return;
+  if (!this->mqtt_sources_valid_) return;
+  const NetCommand *owner = nullptr;
   NetResult *selected = nullptr;
   bool *ready = nullptr;
   bool *waiting = nullptr;
@@ -666,17 +739,26 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
   // Publish the stop response first; the interrupted operation follows on the
   // next cooperative loop iteration.
   if (this->interrupt_mqtt_result_ready_) {
+    owner = &this->interrupt_command_;
     selected = &this->interrupt_result_;
     ready = &this->interrupt_mqtt_result_ready_;
     waiting = &this->interrupt_mqtt_waiting_;
   } else
 #endif
   if (this->normal_->mqtt_result_ready_) {
+    owner = &this->normal_->active_command_;
     selected = &this->normal_->inbound_result_;
     ready = &this->normal_->mqtt_result_ready_;
     waiting = &this->normal_->mqtt_waiting_;
   }
-  if (selected == nullptr) return;
+  if (selected == nullptr || owner == nullptr) return;
+  const char *reply_topic = this->mqtt_sources_.reply_for(owner->source_device_id.c_str());
+  if (reply_topic == nullptr) {
+    // A radio-only origin has no MQTT response route. Do not leak its result to another controller.
+    *ready = false;
+    *waiting = false;
+    return;
+  }
   const NetResult &result = *selected;
   const char *status = result.status == NetStatus::SUCCEEDED ? "succeeded" :
                        result.status == NetStatus::IN_PROGRESS ? "in_progress" :
@@ -720,6 +802,14 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
           size = -1;
         }
       }
+    } else if (std::strcmp(remote.schema.c_str(), "cover-state/v1") == 0 && remote.data.size() == 2) {
+      const auto *state = remote.data.data();
+      size = std::snprintf(payload, sizeof(payload),
+                           "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
+                           "\"execution\":{\"started\":true},\"remote_state\":{"
+                           "\"complete\":true,\"schema\":\"cover-state/v1\",\"value\":{\"position\":%u,\"operation\":%u}}}",
+                           static_cast<unsigned long long>(result.transaction_id),
+                           static_cast<unsigned>(state[0]), static_cast<unsigned>(state[1]));
     } else if (std::strcmp(remote.schema.c_str(), "rgb-state/v1") == 0 &&
         remote.data.size() == 5) {
       const uint8_t *rgb = remote.data.data();
@@ -761,7 +851,7 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
                          message);
   }
   if (size > 0 && static_cast<size_t>(size) < sizeof(payload) &&
-      this->mqtt_wire_.publish(this->mqtt_execution_reply_,
+      this->mqtt_wire_.publish(reply_topic,
                                reinterpret_cast<const uint8_t *>(payload),
                                static_cast<size_t>(size))) {
     *ready = false;
@@ -773,6 +863,14 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
 void CommunicationNetProtocolComponent::loop() {
 #ifdef USE_COMMUNICATION_NET_STATE_SNAPSHOT
   this->state_snapshot_.loop(millis(), this->mqtt_wire_);
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+  bool observation_idle=true;
+  for(const auto &slot:normal_executions_) observation_idle &= normal_available_(slot);
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  observation_idle &= !interrupt_active_ && !interrupt_radio_result_ready_ && !interrupt_mqtt_result_ready_;
+#endif
+  state_observers_.loop(millis(),state_snapshot_,observation_idle);
+#endif
 #endif
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
   this->loop(millis());
@@ -856,7 +954,7 @@ void CommunicationNetProtocolComponent::loop() {
       return;
     }
 #ifdef USE_COMMUNICATION_NET_ACTIVE_GATE
-    if (this->mqtt_execution_source_ != nullptr) {
+    if (!this->mqtt_sources_.empty()) {
       this->receive_mqtt_inbound_(received_payload, payload_length);
       this->mqtt_wire_.release_received();
       return;

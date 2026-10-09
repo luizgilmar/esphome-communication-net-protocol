@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "canonical_command.h"
+#include "command_arguments.h"
 #include "inbound_route_registry.h"
 
 namespace esphome {
@@ -21,14 +22,11 @@ template<size_t Capacity> bool inspect_inbound_command(
   if (local_device == nullptr || device == nullptr || resource == nullptr ||
       action == nullptr || std::strcmp(local_device, device) != 0 ||
       (payload == nullptr && payload_size != 0)) return false;
-  // MQTT's current envelope accepts only {} for an empty payload. The radio
-  // adapter may emit zero bytes or exactly {} for the same intent.
-  if (payload_size != 0 &&
-      (payload_size != 2 || payload[0] != '{' || payload[1] != '}'))
-    return false;
+  CommandArguments arguments{};
+  if (!decode_command_arguments(payload, payload_size, arguments)) return false;
   const char *matched = routes.find(resource, action);
   if (matched == nullptr ||
-      !encode_canonical_command({device, resource, action, nullptr, 0},
+      !encode_canonical_command({device, resource, action, arguments.canonical, arguments.canonical_size},
                                 canonical, canonical_capacity, canonical_size))
     return false;
   route_id = matched;

@@ -28,6 +28,8 @@ class LightStateSnapshot {
   bool add_light(light::LightState *light);
   bool add_binary_field(const char *field, binary_sensor::BinarySensor *sensor);
   bool configured() const { return topic_ != nullptr && field_count_ != 0; }
+  uint32_t generation() const { return generation_; }
+  uint32_t revision() const { return revision_; }
   void setup();
   void loop(uint32_t now_ms, MqttWireTransport &mqtt);
 #if defined(USE_COMMUNICATION_NET_ACTIVE_GATE) || defined(USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH)

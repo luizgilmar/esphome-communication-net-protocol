@@ -42,6 +42,11 @@ class CommunicationTransportAdapter {
 
   // Best-effort cancellation of the matching active attempt.
   virtual bool cancel(TransactionId transaction_id) = 0;
+
+  // The shared submission service requires all participating adapters to use
+  // the same source/session identity. Legacy adapters remain usable by their
+  // existing callers, but are not admitted by that service until upgraded.
+  virtual bool application_identity_matches(const char *, uint64_t) const { return false; }
 };
 
 class CommunicationTransportRegistry {
