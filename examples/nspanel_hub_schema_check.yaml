@@ -1,6 +1,8 @@
+substitutions:
+  protocol_build_root: !env_var LOCALAPPDATA
 esphome:
   name: nspanel-hub-schema-check
-  build_path: ../../hub-schema-build
+  build_path: ${protocol_build_root}/esphome-protocol-schema-build/nspanel_hub_schema_check
 esp32:
   board: esp32dev
   framework:
