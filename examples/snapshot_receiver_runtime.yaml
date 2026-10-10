@@ -1,0 +1,28 @@
+# Bare ESP32dev bench only. No installed device identities or real credentials.
+# Tests inject binary snapshots into the real TX receiver; no radio link tested.
+packages:
+  base: !include snapshot_capacity_compile.yaml
+esphome:
+  name: snapshot-receiver-test
+  build_path: ${protocol_build_root}/esphome-snapshot-receiver-2026.9.1/build/snapshot-receiver-test
+  includes:
+    - ../tests/snapshot_receiver_runtime.h
+esp32:
+  framework:
+    advanced:
+      loop_task_stack_size: 12288
+wifi:
+  enable_on_boot: false
+external_components:
+  - source:
+      type: local
+      path: ../../esphome-sonoff-txultimate/components
+    components: [tx_ultimate]
+tx_ultimate:
+  id: test_tx
+  model: t4
+  ambient_indicators: false
+interval:
+  - interval: 30s
+    then:
+      - lambda: snapshot_receiver_test::run(*id(test_tx));

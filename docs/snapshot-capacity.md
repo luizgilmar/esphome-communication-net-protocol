@@ -53,3 +53,25 @@ RAM and image size match the previously compiled ESPHome 2026.9.1 candidate.
 Equal image size does not imply identical firmware contents or prove reception.
 Build roots are AppData/Local/esphome-snapshot-capacity-2026.9.1 and
 AppData/Local/esphome-tx-snapshot-capacity-2026.9.1 respectively.
+
+## Single-board runtime test (prepared, not yet compiled/executed)
+
+examples/snapshot_receiver_runtime.yaml and tests/snapshot_receiver_runtime.h
+exercise the actual TX RetainedStateObserver through its public query/result
+interface on a bare ESP32dev. Four mapped ambient indicator states are checked
+in memory; no LED strip is required. Cases: four/six/eight fields, missing owned
+field, duplicate owned field, truncated frame, trailing bytes and nine fields.
+Rejected frames must leave all four sentinel indicator values unchanged.
+
+Wi-Fi starts disabled. Snapshot inputs are injected binary test vectors, not
+received radio frames; this test cannot prove MQTT/ESP-NOW delivery, subscription
+handover or physical LED output. The fixture loads the TX component for its real
+receiver code and must be used only on a bare bench board without attached loads.
+It does not use installed-device network credentials or originate actuator commands.
+
+tools/testar-snapshot-receiver.ps1 supports compile, upload and logs; serial port
+is configurable (default COM4). No upload is performed by compile. Expected
+serial result is snapshot.test END passed=8 total=8, repeated every 30 seconds
+so attaching serial logs after flashing does not miss the result. ESPHome
+2026.9.1 configuration validation and C++ source generation passed; C++
+compilation and execution are still pending.
