@@ -6,6 +6,7 @@ import esphome.final_validate as fv
 from esphome import automation
 from esphome.components import binary_sensor, cover, light
 from esphome.const import CONF_ID, CONF_LIGHT_ID, CONF_TIMEOUT, CONF_TRIGGER_ID
+from .snapshot_limits import MAX_FIELDS as SNAPSHOT_MAX_FIELDS, validate_snapshot_budget
 
 CODEOWNERS = ["@project-maintainers"]
 
@@ -333,6 +334,13 @@ def _snapshot_field_name(value):
     return value
 
 
+def _snapshot_budget(fields):
+    try:
+        return validate_snapshot_budget(fields)
+    except ValueError as err:
+        raise cv.Invalid(str(err)) from err
+
+
 SNAPSHOT_FIELD_SCHEMA = cv.All(cv.Schema({
     cv.Required(CONF_FIELD): _snapshot_field_name,
     cv.Optional(CONF_LIGHT_IDS): cv.All(
@@ -363,7 +371,8 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
         cv.Optional("peer_interval", default="2s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=1000),max=cv.TimePeriod(milliseconds=10000))),
     }),
     cv.Required(CONF_FIELDS): cv.All(
-        cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=4)
+        cv.ensure_list(SNAPSHOT_FIELD_SCHEMA), cv.Length(min=1, max=SNAPSHOT_MAX_FIELDS),
+        _snapshot_budget
     ),
 })
 
@@ -536,6 +545,7 @@ async def to_code(config):
     )
     if CONF_STATE_SNAPSHOT in config:
         cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT")
+        cg.add_define("COMMUNICATION_NET_SNAPSHOT_CAPACITY", max(4, len(config[CONF_STATE_SNAPSHOT][CONF_FIELDS])))
         if CONF_PUSH in config[CONF_STATE_SNAPSHOT]:
             cg.add_define("USE_COMMUNICATION_NET_STATE_SNAPSHOT_PUSH")
     if (esp_now and esp_now[CONF_EXECUTE_INBOUND]) or (mqtt_config and mqtt_config[CONF_EXECUTE_INBOUND]):

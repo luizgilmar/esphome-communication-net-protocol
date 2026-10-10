@@ -19,6 +19,26 @@ def test_legacy_pair_and_second_origin_remain_declarative(schema):
     assert module._validate(deepcopy(config))["inbound"]["normal_executions"] == 2
     assert config["mqtt"]["source_id"] != config["mqtt"]["sources"][0]["source_id"]
 
+
+def test_snapshot_schema_accepts_six_fields_with_individual_rgb(schema):
+    module, _ = schema
+    fields = [{"field": "spot", "light_ids": ["spot"]},
+              {"field": "strips", "light_ids": ["strips"], "rgb": True},
+              {"field": "panel1", "binary_sensor_id": "panel1"},
+              {"field": "panel2", "binary_sensor_id": "panel2"},
+              {"field": "general", "light_ids": ["general"]},
+              {"field": "superior", "light_ids": ["superior"], "rgb": True}]
+    result = module.STATE_SNAPSHOT_SCHEMA({"topic": "test/state", "fields": fields})
+    assert len(result["fields"]) == 6
+
+
+def test_snapshot_schema_rejects_payload_overflow(schema):
+    module, _ = schema
+    fields = [{"field": f"f{i}", "light_ids": [f"light{i}"], "rgb": True}
+              for i in range(4)]
+    with pytest.raises(cv.Invalid, match="MQTT payload"):
+        module.STATE_SNAPSHOT_SCHEMA({"topic": "test/state", "fields": fields})
+
 @pytest.mark.parametrize("change", ["duplicate_source", "duplicate_reply", "missing_legacy_reply", "wildcard_reply"])
 def test_invalid_origin_configuration_is_rejected(schema, change):
     module, original = schema

@@ -2,6 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "esphome/core/defines.h"
+
+#ifndef COMMUNICATION_NET_SNAPSHOT_CAPACITY
+#define COMMUNICATION_NET_SNAPSHOT_CAPACITY 4
+#endif
 
 #include "esphome/core/preferences.h"
 
@@ -43,7 +48,8 @@ class LightStateSnapshot {
 #endif
 
  private:
-  static constexpr size_t MAX_FIELDS = 4;
+  static constexpr size_t MAX_FIELDS = COMMUNICATION_NET_SNAPSHOT_CAPACITY;
+  static_assert(MAX_FIELDS >= 4 && MAX_FIELDS <= 8, "Invalid snapshot capacity");
   static constexpr size_t MAX_LIGHTS = 3;
   static constexpr size_t MAX_WIRE_PAYLOAD = 448;
   struct Value {
