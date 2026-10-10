@@ -54,7 +54,7 @@ Equal image size does not imply identical firmware contents or prove reception.
 Build roots are AppData/Local/esphome-snapshot-capacity-2026.9.1 and
 AppData/Local/esphome-tx-snapshot-capacity-2026.9.1 respectively.
 
-## Single-board runtime test (prepared, not yet compiled/executed)
+## Single-board runtime test
 
 examples/snapshot_receiver_runtime.yaml and tests/snapshot_receiver_runtime.h
 exercise the actual TX RetainedStateObserver through its public query/result
@@ -74,4 +74,26 @@ is configurable (default COM4). No upload is performed by compile. Expected
 serial result is snapshot.test END passed=8 total=8, repeated every 30 seconds
 so attaching serial logs after flashing does not miss the result. ESPHome
 2026.9.1 configuration validation and C++ source generation passed; C++
-compilation and execution are still pending.
+compilation and execution were subsequently confirmed below.
+
+### Observed result — 10/10/2026
+
+Firmware compiled 09/10/2026 23:58:27 -0300, config_hash 0x94117de3,
+RAM 133,792 / 180,736 bytes (74.0%), image 976,511 bytes. The supplied log
+confirms serial flashing with hash verification and ESP32 revision 3.0 boot.
+
+Two complete cycles at 00:02:10 and 00:02:40 reported END passed=8 total=8.
+All eight named cases passed in each cycle. Valid snapshots updated the four
+mapped indicator states in memory; malformed snapshots preserved all four
+sentinel states, as asserted by the test. No additional boot or panic appeared
+in the supplied excerpt. This is a short functional check, not a soak test.
+
+The inherited radio component logged reconnect-suppression confirmation
+warnings while Wi-Fi was disabled. The receiver tests passed independently;
+these logs do not establish radio readiness or validate reconnect behavior.
+Radio delivery, producer-to-receiver integration, MQTT transitions and physical
+LED output remain outside this injected test.
+
+Source evidence: Codex attachment
+3fbaa505-1ce7-4c6d-81cf-c5db07eee4b0/Texto colado.txt,
+SHA256 4665059892798b61708e52eab497da5183890f2d1c73d5e87ccbd9d2a07d3823.
