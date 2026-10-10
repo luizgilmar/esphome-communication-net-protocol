@@ -22,9 +22,10 @@ Old TX receivers reject an ESP-NOW snapshot with more than four fields.
 Keep producer YAML on its validated four fields until both changes have been
 compiled and checked on the bench, published and pinned to Git revisions.
 
-Validation so far: Python budget/schema tests and existing snapshot/observation
-contract tests. No native C++ execution, ESP32 compilation or hardware validation
-of the expanded snapshot has been performed.
+Validation: Python budget/schema tests and existing snapshot/observation
+contract tests passed (34 total). Both ESP32 compilation fixtures subsequently
+passed with ESPHome 2026.9.1, as reported by the user below. Runtime reception of
+extra fields and hardware validation of the expanded snapshot remain pending.
 
 ## Compilation step
 
@@ -39,3 +40,16 @@ These are compilation fixtures, not bench deployment configurations. In
 particular the TX fixture still has the installed TX network identities.
 Do not flash it onto a bench node. After compilation, prepare separate bench
 identities and a runtime check for extra-field reception before deployment.
+
+## Compilation results reported by the user
+
+| Fixture | Build time (-0300) | Config hash | Static RAM | Image bytes |
+| --- | --- | --- | --- | --- |
+| Six-field publisher | 2026-10-09 23:47:01 | 0x519793da | 68,488 / 180,736 (37.9%) | 877,015 |
+| Candidate TX receiver | 2026-10-09 23:49:04 | 0xa50da556 | 151,792 / 180,736 (84.0%) | 1,128,671 |
+
+Both logs reported Successfully compiled program and no upload. The TX static
+RAM and image size match the previously compiled ESPHome 2026.9.1 candidate.
+Equal image size does not imply identical firmware contents or prove reception.
+Build roots are AppData/Local/esphome-snapshot-capacity-2026.9.1 and
+AppData/Local/esphome-tx-snapshot-capacity-2026.9.1 respectively.
