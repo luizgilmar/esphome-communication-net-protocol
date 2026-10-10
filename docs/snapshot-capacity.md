@@ -25,3 +25,17 @@ compiled and checked on the bench, published and pinned to Git revisions.
 Validation so far: Python budget/schema tests and existing snapshot/observation
 contract tests. No native C++ execution, ESP32 compilation or hardware validation
 of the expanded snapshot has been performed.
+
+## Compilation step
+
+Run tools/compilar-snapshot-capacity.ps1 with -Role publisher and then -Role tx.
+The script requires ESPHome 2026.9.1, stores build/data outside OneDrive and
+never uploads. Publisher uses virtual outputs and six fields; TX inherits its
+canonical configuration and overrides only source substitutions to read local
+candidate repositories. Canonical source defaults retain the installed Git
+SHAs. Both fixtures passed ESPHome 2026.9.1 configuration validation.
+
+These are compilation fixtures, not bench deployment configurations. In
+particular the TX fixture still has the installed TX network identities.
+Do not flash it onto a bench node. After compilation, prepare separate bench
+identities and a runtime check for extra-field reception before deployment.

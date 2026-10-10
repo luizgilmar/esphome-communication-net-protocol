@@ -1,0 +1,17 @@
+# Compilation fixture only: virtual outputs and validation-only credentials.
+# Reusing check_strip in multiple fields verifies encoding capacity, not hardware.
+packages:
+  base: !include nspanel_hub_schema_check.yaml
+esphome:
+  name: snapshot-capacity-check
+  build_path: ${protocol_build_root}/esphome-snapshot-capacity-2026.9.1/build/snapshot-capacity-check
+communication_net_protocol:
+  state_snapshot:
+    topic: validation/snapshot
+    fields:
+      - {field: spot, light_ids: [check_strip]}
+      - {field: strips, light_ids: [check_strip], rgb: true}
+      - {field: panel1, light_ids: [check_strip]}
+      - {field: panel2, light_ids: [check_strip]}
+      - {field: general, light_ids: [check_strip]}
+      - {field: superior, light_ids: [check_strip], rgb: true}
