@@ -30,9 +30,10 @@ class EspNowCommandTransport
       public espnow_net_protocol::NetCommandResultObserver {
  public:
   void set_protocol(
-      espnow_net_protocol::EspNowNetProtocolComponent *protocol) {
+      espnow_net_protocol::EspNowNetProtocolComponent *protocol,
+      bool register_observer = true) {
     this->protocol_ = protocol;
-    if (this->protocol_ != nullptr)
+    if (this->protocol_ != nullptr && register_observer)
       this->protocol_->set_command_result_observer(this);
   }
   void set_destination_registry(

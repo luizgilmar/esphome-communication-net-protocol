@@ -1,0 +1,28 @@
+# Compile-only fixture. No credentials or physical outputs; never install.
+packages:
+  base: !include nspanel_hub_schema_check.yaml
+esphome:
+  name: outbound-runtime-check
+  build_path: ${protocol_build_root}/esphome-outbound-runtime-2026.9.1/build/outbound-runtime-check
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [communication_outbound]
+communication_outbound:
+  id: check_outbound
+  source_id: check_hub
+  mqtt:
+    mqtt_id: check_mqtt
+    command_prefix: tx/commands
+    reply_topic: tx/results/check_hub
+  esp_now:
+    espnow_net_protocol_id: check_radio
+  policies:
+    - id: automatic
+      transports: [mqtt, esp_now]
+  destinations:
+    - id: panel
+      device_id: painel-gian-porta
+      policy: automatic
+      espnow_peer: check_panel

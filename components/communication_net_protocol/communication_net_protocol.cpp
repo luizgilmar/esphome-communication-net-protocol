@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "mqtt_envelope_decoder.h"
+#include "rgb_completion.h"
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
 #include "mqtt_result_decoder.h"
 #endif
@@ -490,13 +491,10 @@ void CommunicationNetProtocolComponent::loop_normal_(uint32_t now_ms) {
   if (completed && this->normal_->active_binding_->check_rgb()) {
     for (size_t i = 0; i < this->normal_->active_binding_->rgb_light_count(); ++i) {
       const auto &values = this->normal_->active_binding_->rgb_light_at(i)->current_values;
-      const float observed[3]{values.get_red(), values.get_green(), values.get_blue()};
-      for (size_t channel = 0; channel < 3; ++channel) {
-        const int actual = static_cast<int>(observed[channel] * 255.0f + 0.5f);
-        const int expected = this->normal_->active_binding_->expected_rgb(channel);
-        // One unit accounts for float-to-byte rounding in light color values.
-        completed &= actual >= expected - 1 && actual <= expected + 1;
-      }
+      completed &= rgb_completion_matches(values.get_red(), values.get_green(), values.get_blue(),
+          this->normal_->active_binding_->expected_rgb(0),
+          this->normal_->active_binding_->expected_rgb(1),
+          this->normal_->active_binding_->expected_rgb(2));
     }
   }
   if (completed && this->normal_->active_binding_->check_brightness()) {
