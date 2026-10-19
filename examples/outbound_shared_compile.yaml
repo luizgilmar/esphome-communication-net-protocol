@@ -1,0 +1,9 @@
+packages:
+  base: !include nspanel_hub_schema_check.yaml
+esphome:
+  name: outbound-shared-check
+  build_path: ${protocol_build_root}/esphome-outbound-shared-2026.9.1/build/outbound-shared-check
+  build_flags:
+    - -DUSE_COMMUNICATION_NET_OUTBOUND_ESPNOW
+  includes:
+    - ../tests/outbound_shared_compile.h

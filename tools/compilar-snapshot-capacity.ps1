@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('publisher','tx')][string]$Role = 'publisher',
+  [ValidateSet('publisher','tx','shared')][string]$Role = 'publisher',
   [string]$PythonPath = "$env:LOCALAPPDATA\esphome-2026.9.1\venv\Scripts\python.exe"
 )
 $ErrorActionPreference = 'Stop'
@@ -8,10 +8,12 @@ $versionSnapshot = & $PythonPath -c 'import importlib.metadata; print(importlib.
 if ($LASTEXITCODE -ne 0 -or "$versionSnapshot".Trim() -ne '2026.9.1') { throw 'Requer ESPHome 2026.9.1.' }
 $configSnapshot = if ($Role -eq 'publisher') {
   Join-Path $repoSnapshot 'examples\snapshot_capacity_compile.yaml'
-} else {
+} elseif ($Role -eq 'tx') {
   Join-Path (Split-Path $repoSnapshot -Parent) 'esphome-sonoff-txultimate\examples\quartogian_tx_snapshot_compile.yaml'
+} else {
+  Join-Path $repoSnapshot 'examples\outbound_shared_compile.yaml'
 }
-$rootSnapshot = Join-Path $env:LOCALAPPDATA $(if ($Role -eq 'publisher') { 'esphome-snapshot-capacity-2026.9.1' } else { 'esphome-tx-snapshot-capacity-2026.9.1' })
+$rootSnapshot = Join-Path $env:LOCALAPPDATA $(if ($Role -eq 'publisher') { 'esphome-snapshot-capacity-2026.9.1' } elseif ($Role -eq 'tx') { 'esphome-tx-snapshot-capacity-2026.9.1' } else { 'esphome-outbound-shared-2026.9.1' })
 $namesSnapshot = @('ESPHOME_BUILD_PATH','ESPHOME_DATA_DIR','ESPHOME_ESP_IDF_PREFIX')
 $savedSnapshot = @{}
 foreach ($nameSnapshot in $namesSnapshot) { $savedSnapshot[$nameSnapshot] = [Environment]::GetEnvironmentVariable($nameSnapshot,'Process') }
