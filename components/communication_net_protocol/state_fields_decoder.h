@@ -15,6 +15,12 @@ struct ObservedLightSnapshot {
   size_t count{0};
   ObservedLightField fields[8]{};
 };
+// Equal versions refresh only after a new correlated query, never a repeated push.
+constexpr bool state_version_allowed(uint32_t generation, uint32_t revision,
+                                     uint32_t accepted_generation, uint32_t accepted_revision, bool allow_equal) {
+  return generation != 0 && revision != 0 && (generation > accepted_generation ||
+      (generation == accepted_generation && (revision > accepted_revision || (allow_equal && revision == accepted_revision))));
+}
 constexpr uint32_t state_read32(const uint8_t *p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }

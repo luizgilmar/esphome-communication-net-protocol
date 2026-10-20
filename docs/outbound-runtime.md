@@ -9,3 +9,10 @@ O NSPanel pode associar `outbound_service` ao cadastro de recursos. A admissao d
 Validacao desta etapa: 113 testes Python passaram; ESPHome 2026.9.1 gerou codigo das fixtures do servico e da integracao NSPanel. A compilacao C++ completa e o ensaio de comandos no hardware ainda estao pendentes. As duas compilacoes anteriores dos adaptadores compartilhados foram confirmadas pelo usuario.
 
 Fixtures somente para compilacao, sem credenciais reais e sem instalacao: `examples/outbound_runtime_compile.yaml` neste repositorio e `examples/outbound-runtime-check.yaml` no repositorio NSPanel. Nenhuma alteracao no firmware instalado ou nos pins Git de producao.
+
+
+## Encaminhamento de publicacoes — candidato 20/10/2026
+
+Runtime inclui registro limitado de PushSnapshotObserver e um unico callback do endpoint para resultados espontaneos. Filtra peer configurado, namespace de transacao (bit 63), consistencia e sucesso, converte pelo mesmo EspNowNetModelAdapter e entrega destino/identidade ao observador. Nao publica estado do dispositivo por ACK de comando. O modo de consulta anterior continua disponivel; nspanel_snapshot e responsavel por assinatura e versoes.
+
+StateObservationClient admite limite opcional de renovacao para respeitar o frescor do consumidor. Zero preserva a cadencia anterior validity/3 do TX; configurado usa min(validity/3, limite). Cinco verificacoes C++ em tests/state_observation_timing_compile.h e limite de 64 bytes acompanham a compilacao candidata. Detalhes e ensaio em bancada-cc2/docs/signal-subscription.md. Os pins de firmware instalados nao mudaram.

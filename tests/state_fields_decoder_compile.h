@@ -38,4 +38,9 @@ constexpr bool capacity(unsigned count) {
 }
 static_assert(capacity(6), "six-field producer accepted");
 static_assert(capacity(8), "eight-field capacity accepted");
+static_assert(state_version_allowed(2, 1, 1, 999, false), "new generation allows revision restart");
+static_assert(!state_version_allowed(1, 999, 2, 1, true), "old generation rejected");
+static_assert(!state_version_allowed(2, 4, 2, 5, true), "old revision rejected");
+static_assert(state_version_allowed(2, 5, 2, 5, true), "correlated equal revision refreshes freshness");
+static_assert(!state_version_allowed(2, 5, 2, 5, false), "duplicate push cannot refresh freshness");
 }

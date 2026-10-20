@@ -13,9 +13,14 @@
 #endif
 
 namespace esphome::communication_net_protocol::outbound {
+class PushSnapshotObserver {
+ public:
+  virtual ~PushSnapshotObserver() = default;
+  virtual void on_pushed_snapshot(const char *destination, const char *device, const CommandResult &result) = 0;
+};
 class OutboundRuntime : public Component, public CommandSubmissionPort, public SubmissionObserver
 #ifdef USE_COMMUNICATION_NET_OUTBOUND_ESPNOW
-    , public espnow_net_protocol::NetCommandResultObserver
+    , public espnow_net_protocol::NetCommandResultObserver, public espnow_net_protocol::NetUnsolicitedResultObserver
 #endif
 {
  public:
@@ -37,9 +42,18 @@ class OutboundRuntime : public Component, public CommandSubmissionPort, public S
     if (destination_count_ >= 16) { config_ok_ = false; return; }
     const bool ok = service_.add_destination(id, device, policy) && destinations_.add_destination(device);
     config_ok_ = ok && config_ok_;
-    metadata_[destination_count_++] = {device, peer};
+    metadata_[destination_count_++] = {id, device, peer};
   }
   void add_observer(SubmissionObserver *observer) { config_ok_ = service_.add_observer(observer) && config_ok_; }
+  void add_push_observer(PushSnapshotObserver *observer) {
+#ifdef USE_COMMUNICATION_NET_OUTBOUND_ESPNOW
+    if (observer == nullptr || push_count_ == 4) { config_ok_ = false; return; }
+    for (size_t i = 0; i < push_count_; ++i) if (push_observers_[i] == observer) return;
+    push_observers_[push_count_++] = observer;
+#else
+    config_ok_ = false;
+#endif
+  }
   void setup() override {
     boot_ = ((uint64_t(esp_random()) << 32) | esp_random()) & 0x7fffffffffffffffULL;
     if (boot_ == 0) boot_ = 1;
@@ -68,6 +82,7 @@ class OutboundRuntime : public Component, public CommandSubmissionPort, public S
       ok = registries_[0].register_transport(&radio_[0]) && ok;
       ok = registries_[2].register_transport(&radio_[1]) && ok;
       endpoint_->set_command_result_observer(this);
+      if (push_count_ != 0) endpoint_->set_unsolicited_result_observer(this);
     }
 #endif
     ok = service_.add_observer(this) && ok;
@@ -86,13 +101,29 @@ class OutboundRuntime : public Component, public CommandSubmissionPort, public S
              terminal ? "YES" : "NO", static_cast<unsigned>(result.result), static_cast<unsigned>(result.error.code));
   }
 #ifdef USE_COMMUNICATION_NET_OUTBOUND_ESPNOW
+  void on_unsolicited_net_result(espnow_net_protocol::PeerIndex peer, const espnow_net_protocol::NetResult &result) override {
+    // Encrypted endpoint binds the configured peer; ordinary replies never enter this path.
+    if (push_count_ == 0 || (result.transaction_id & (uint64_t(1) << 63)) == 0 ||
+        result.status != espnow_net_protocol::NetResultStatus::SUCCEEDED || !result.consistent()) return;
+    for (size_t i = 0; i < destination_count_; ++i) {
+      const auto &metadata = metadata_[i];
+      if (peer == CommunicationDestinationRegistry::INVALID_ESPNOW_PEER ||
+          destinations_.espnow_peer_for(metadata.device) != peer) continue;
+      CommandResult converted;
+      EspNowNetModelAdapter model;
+      if (!model.from_net(result, converted)) return;
+      for (size_t j = 0; j < push_count_; ++j)
+        push_observers_[j]->on_pushed_snapshot(metadata.destination, metadata.device, converted);
+      return;
+    }
+  }
   void on_net_command_result(espnow_net_protocol::PeerIndex peer, const espnow_net_protocol::NetResult &result) override {
     for (auto &adapter : radio_)
       if (adapter.state() != EspNowCommandTransportState::IDLE) adapter.on_net_command_result(peer, result);
   }
 #endif
  protected:
-  struct Metadata { const char *device{nullptr}; const char *peer{nullptr}; };
+  struct Metadata { const char *destination{nullptr}; const char *device{nullptr}; const char *peer{nullptr}; };
   CommunicationTransportRegistry registries_[3];
   CommandSubmissionService service_{registries_[0], registries_[1], registries_[2]};
   CommunicationDestinationRegistry destinations_;
@@ -108,6 +139,8 @@ class OutboundRuntime : public Component, public CommandSubmissionPort, public S
 #ifdef USE_COMMUNICATION_NET_OUTBOUND_ESPNOW
   espnow_net_protocol::EspNowNetProtocolComponent *endpoint_{nullptr};
   EspNowCommandTransport radio_[2];
+  PushSnapshotObserver *push_observers_[4]{};
+  size_t push_count_{0};
 #endif
 };
 }  // namespace esphome::communication_net_protocol::outbound

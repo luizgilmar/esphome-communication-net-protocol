@@ -12,6 +12,15 @@ class StateObservationClient {
     if (query_interval < 5000 || query_interval > 60000 || freshness < 2 * query_interval || freshness > 300000) return false;
     interval_ = query_interval; freshness_ = freshness; enabled_ = true; return true;
   }
+  // Optional consumer freshness bound. Zero keeps the original TX cadence.
+  bool set_renewal_limit(uint32_t interval) {
+    if (interval < 5000 || interval > 60000) return false;
+    renewal_limit_ = interval; return true;
+  }
+  static constexpr uint32_t renewal_interval_for(uint32_t validity, uint32_t limit) {
+    const uint32_t interval = validity / 3;
+    return limit != 0 && limit < interval ? limit : interval;
+  }
   bool enabled() const { return enabled_; }
   uint32_t freshness() const { return freshness_; }
   bool mqtt_healthy(uint32_t now) const {
@@ -31,7 +40,7 @@ class StateObservationClient {
     // Keep the radio lease current before probing a silent MQTT endpoint again.
     if (!mqtt_healthy(now) && ready(now, radio_due_)) {
       if (nonce_ == 0 || (!active_ && uint32_t(now - hello_at_) >= 10000)) return Operation::HELLO;
-      if (!active_ || uint32_t(now - lease_at_) >= validity_ / 3) return Operation::LEASE;
+      if (!active_ || uint32_t(now - lease_at_) >= renewal_interval_()) return Operation::LEASE;
     }
     if (connected_ && ready(now, mqtt_due_)) return Operation::MQTT_QUERY;
     if (mqtt_healthy(now) && active_ && ready(now, radio_due_)) return Operation::STOP;
@@ -68,6 +77,9 @@ class StateObservationClient {
     else { nonce_ = 0; active_ = false; radio_due_ = now + retry(radio_failures_, jitter); }
   }
  private:
+  uint32_t renewal_interval_() const {
+    return renewal_interval_for(validity_, renewal_limit_);
+  }
   static bool ready(uint32_t now, uint32_t deadline) {
     return deadline == 0 || int32_t(now - deadline) >= 0;
   }
@@ -80,6 +92,7 @@ class StateObservationClient {
   uint64_t nonce_{0};
   uint32_t interval_{15000}, freshness_{45000}, proof_at_{0};
   uint32_t mqtt_due_{0}, radio_due_{0}, validity_{60000}, hello_at_{0}, lease_at_{0};
+  uint32_t renewal_limit_{0};
   Operation pending_{Operation::NONE};
   uint8_t mqtt_failures_{0}, radio_failures_{0};
   bool enabled_{false}, connected_{false}, proof_{false}, active_{false}, pending_mqtt_valid_{false};
