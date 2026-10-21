@@ -87,6 +87,26 @@ CommandDraft draft(const char *destination, const char *device, const char *reso
 int main() {
   {
     Fixture f;
+    CommunicationPolicy probe;
+    assert(probe.add_transport(CommunicationTransport::MQTT));
+    assert(f.service.add_policy("mqtt_probe", probe));
+    auto query = draft("route_a", "hub_a", "state/snapshot", "get");
+    query.observation_policy.assign("mqtt_probe");
+    assert(f.service.submit(query, 0).status == SubmissionStatus::ADMITTED);
+    assert(std::strcmp(f.first.sent.policy_id.c_str(), "mqtt_probe") == 0);
+  }
+  {
+    Fixture f;
+    auto actuation = draft("route_a", "hub_a", "relay/1");
+    actuation.observation_policy.assign("default");
+    assert(f.service.submit(actuation, 0).status == SubmissionStatus::INVALID);
+    auto unknown = draft("route_a", "hub_a", "state/snapshot", "get");
+    unknown.observation_policy.assign("not_configured");
+    assert(f.service.submit(unknown, 0).status == SubmissionStatus::UNAVAILABLE);
+  }
+
+  {
+    Fixture f;
     const auto a = f.service.submit(draft("route_a", "hub_a", "relay/1"), 0);
     const auto b = f.service.submit(draft("route_b", "hub_b", "relay/1"), 0);
     assert(a.status == SubmissionStatus::ADMITTED && b.status == SubmissionStatus::ADMITTED);

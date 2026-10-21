@@ -14,6 +14,7 @@ struct CommandDraft {
   CommandIntent command;
   uint32_t timeout_ms{0};
   SubmissionKind kind{SubmissionKind::NORMAL};
+  BoundedText<31> observation_policy;  // Optional, restricted to state read/control resources.
 };
 struct Submission {
   SubmissionStatus status{SubmissionStatus::INVALID};
@@ -84,7 +85,11 @@ class CommandSubmissionService : public CommandSubmissionPort {
     CommandArguments arguments;
     if (!decode_command_arguments(draft.command.payload.data(), draft.command.payload.size(), arguments))
       return {SubmissionStatus::INVALID, 0};
-    const auto *policy = policy_(destination->policy.c_str());
+    if (!draft.observation_policy.empty() &&
+        std::strcmp(draft.target.resource.c_str(), "state/snapshot") != 0 &&
+        std::strcmp(draft.target.resource.c_str(), "state/observation/v1") != 0) return {SubmissionStatus::INVALID, 0};
+    const char *policy_id = draft.observation_policy.empty() ? destination->policy.c_str() : draft.observation_policy.c_str();
+    const auto *policy = policy_(policy_id);
     if (boot_id_ == 0 || policy == nullptr) return {SubmissionStatus::UNAVAILABLE, 0};
     // No new normal command may overtake another command for its resource,
     // including an active interrupt. Callers retry BUSY without a new effect.
@@ -113,7 +118,7 @@ class CommandSubmissionService : public CommandSubmissionPort {
     request.target = draft.target;
     request.command = draft.command;
     request.timeout_ms = draft.timeout_ms;
-    request.policy_id = destination->policy;
+    request.policy_id.assign(policy_id);
     selected->context = {draft.destination, draft.target, request.transaction_id};
     selected->occupied = true;
     if (!selected->runner.start(request, policy->policy, now_ms)) {
