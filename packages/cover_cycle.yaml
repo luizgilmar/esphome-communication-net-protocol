@@ -6,6 +6,7 @@ communication_net_protocol:
       - id: ${cycle_binding_id}
         resource: ${cycle_resource}
         command: cycle
+        interrupt_via_stop: true
         then:
           - cover.toggle: ${cycle_cover_id}
         # Acknowledges dispatch, not a final position or confirmed movement.
@@ -13,7 +14,7 @@ communication_net_protocol:
           delay: 50ms
           timeout: 1s
 
-# Cycle is a normal transaction. It cannot interrupt a pending protocol
-# open/close transaction; the explicit stop route retains that priority.
-# A movement started directly on the cover (e.g. via HA) does not occupy
-# the protocol lane; native toggle can stop it once cycle is admitted.
+# Requires a stop binding for the same resource with interrupts_active and
+# cover completion expected: idle, plus interruptible movement bindings.
+# During a pending movement, the HUB uses only that stop binding. If the
+# cover has already become idle it confirms idle without actuating it.

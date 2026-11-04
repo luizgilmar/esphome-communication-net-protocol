@@ -124,6 +124,8 @@ class DeclarativeInboundBinding : public Trigger<uint16_t, uint8_t, uint8_t, uin
   uint32_t completion_delay() const { return completion_delay_ms_; }
   bool interruptible() const { return interruptible_; }
   bool interrupts_active() const { return interrupts_active_; }
+  bool interrupt_via_stop() const { return interrupt_via_stop_; }
+  void set_interrupt_via_stop(bool enabled) { interrupt_via_stop_ = enabled; }
 
  private:
   const char *execution_scope_{nullptr};
@@ -156,6 +158,7 @@ class DeclarativeInboundBinding : public Trigger<uint16_t, uint8_t, uint8_t, uin
   bool timer_completion_{false};
   bool interruptible_{false};
   bool interrupts_active_{false};
+  bool interrupt_via_stop_{false};
 };
 
 }  // namespace communication_net_protocol

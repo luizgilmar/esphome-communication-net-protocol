@@ -49,6 +49,22 @@ cover:
 communication_net_protocol:
   id: check_protocol
   device_id: check_hub
+  inbound:
+    bindings:
+      - id: check_open
+        resource: cover/persiana
+        command: open
+        interruptible: true
+        then:
+          - cover.open: check_cover
+        completion: {cover_id: check_cover, expected: open, timeout: 20s}
+      - id: check_stop
+        resource: cover/persiana
+        command: stop
+        interrupts_active: true
+        then:
+          - cover.stop: check_cover
+        completion: {cover_id: check_cover, expected: idle, timeout: 1s}
   mqtt:
     mqtt_id: check_mqtt
     listen_commands: true

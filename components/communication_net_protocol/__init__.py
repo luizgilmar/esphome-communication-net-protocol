@@ -305,6 +305,7 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
     }),
     cv.Optional(CONF_INTERRUPTIBLE, default=False): cv.boolean,
     cv.Optional(CONF_INTERRUPTS_ACTIVE, default=False): cv.boolean,
+    cv.Optional("interrupt_via_stop", default=False): cv.boolean,
     cv.Optional(CONF_COMPLETION): LIGHT_COMPLETION_SCHEMA,
 }, single=True)
 
@@ -471,6 +472,17 @@ def _validate(config):
                     f"binding {name} completion timeout must exceed delay"
                 )
         for binding in bindings:
+            if binding["interrupt_via_stop"]:
+                if (binding[CONF_COMMAND] != "cycle" or binding[CONF_ARGUMENTS]["type"] != "none"
+                        or binding[CONF_INTERRUPTS_ACTIVE] or binding[CONF_INTERRUPTIBLE]):
+                    raise cv.Invalid("interrupt_via_stop requires a normal argument-free cycle")
+                if not any(candidate[CONF_RESOURCE] == binding[CONF_RESOURCE]
+                           and candidate[CONF_COMMAND] == "stop"
+                           and candidate[CONF_INTERRUPTS_ACTIVE]
+                           and CONF_COVER_ID in candidate.get(CONF_COMPLETION, {})
+                           and candidate[CONF_COMPLETION].get(CONF_EXPECTED) == "idle"
+                           for candidate in bindings):
+                    raise cv.Invalid("interrupt_via_stop requires an interrupting stop with idle cover completion")
             if binding[CONF_INTERRUPTS_ACTIVE] and not any(
                 candidate[CONF_INTERRUPTIBLE] and
                 candidate[CONF_RESOURCE] == binding[CONF_RESOURCE]
@@ -607,6 +619,8 @@ async def to_code(config):
         cg.add(trigger.set_argument_range(arguments["min"], arguments["max"]))
         cg.add(trigger.set_interruptible(binding[CONF_INTERRUPTIBLE]))
         cg.add(trigger.set_interrupts_active(binding[CONF_INTERRUPTS_ACTIVE]))
+        if binding["interrupt_via_stop"]:
+            cg.add(trigger.set_interrupt_via_stop(True))
         if CONF_COMPLETION in binding:
             completion = binding[CONF_COMPLETION]
             if CONF_DELAY in completion:

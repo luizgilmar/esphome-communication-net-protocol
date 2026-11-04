@@ -222,13 +222,26 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
   if (declared_binding != nullptr && !declared_binding->accepts_arguments(arguments))
     return NetStart::INVALID_COMMAND;
   bool interrupt = false;
+#ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+  DeclarativeInboundBinding *cycle_stop = nullptr;
+#endif
   if (this->normal_->inbound_active_ &&
       command.transaction_id != this->normal_->active_command_.transaction_id) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (declared_binding != nullptr && declared_binding->interrupt_via_stop() &&
+        this->normal_->active_binding_ != nullptr && this->normal_->active_binding_->cover() != nullptr) {
+      const auto stop_index = this->inbound_routes_.find_index(command.resource.c_str(), "stop");
+      if (stop_index < this->inbound_binding_count_) {
+        auto *stop = this->inbound_bindings_[stop_index];
+        if (stop != nullptr && stop->interrupts_active() &&
+            stop->cover() == this->normal_->active_binding_->cover())
+          cycle_stop = stop;
+      }
+    }
     interrupt = this->normal_->active_binding_ != nullptr &&
                 this->normal_->active_binding_->interruptible() &&
                 declared_binding != nullptr &&
-                declared_binding->interrupts_active() &&
+                (declared_binding->interrupts_active() || cycle_stop != nullptr) &&
                 this->command_matches_active_resource_(command);
     const bool same_interrupt = this->interrupt_active_ &&
         command.transaction_id == this->interrupt_command_.transaction_id;
@@ -326,6 +339,7 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
   }
   if (interrupt) {
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
+    if (cycle_stop != nullptr) binding = cycle_stop;
     this->interrupt_target_ = this->normal_;
     this->interrupt_command_ = command;
     this->interrupt_binding_ = binding;
@@ -338,8 +352,12 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
              route, radio ? "esp_now" : "mqtt",
              static_cast<unsigned long long>(command.transaction_id),
              static_cast<unsigned long long>(this->normal_->active_command_.transaction_id));
-    binding->apply_arguments(arguments);
-    binding->trigger(arguments.value, arguments.red, arguments.green, arguments.blue);
+    // A cycle that interrupted a transaction must never start a new movement.
+    // The cover may have reached its target before this request was admitted.
+    if (cycle_stop == nullptr || cycle_stop->cover()->current_operation != cover::COVER_OPERATION_IDLE) {
+      binding->apply_arguments(arguments);
+      binding->trigger(arguments.value, arguments.red, arguments.green, arguments.blue);
+    }
     this->interrupt_result_ = {};
     this->interrupt_result_.transaction_id = command.transaction_id;
     this->interrupt_result_.status = NetStatus::IN_PROGRESS;
