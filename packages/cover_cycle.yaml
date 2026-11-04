@@ -1,0 +1,19 @@
+# Reusable for an ESPHome time_based cover. Its native toggle owns the cycle.
+# Include with vars: cycle_binding_id, cycle_resource, cycle_cover_id.
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: ${cycle_binding_id}
+        resource: ${cycle_resource}
+        command: cycle
+        then:
+          - cover.toggle: ${cycle_cover_id}
+        # Acknowledges dispatch, not a final position or confirmed movement.
+        completion:
+          delay: 50ms
+          timeout: 1s
+
+# Cycle is a normal transaction. It cannot interrupt a pending protocol
+# open/close transaction; the explicit stop route retains that priority.
+# A movement started directly on the cover (e.g. via HA) does not occupy
+# the protocol lane; native toggle can stop it once cycle is admitted.

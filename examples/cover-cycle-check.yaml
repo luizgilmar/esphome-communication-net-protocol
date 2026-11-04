@@ -1,0 +1,67 @@
+# Compile-only fixture; the time_based cover has no motor outputs.
+substitutions:
+  build_root: !env_var LOCALAPPDATA
+esphome:
+  name: cover-cycle-check
+  build_path: ${build_root}/esphome-protocol-schema-build/cover-cycle-check
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+wifi:
+  ssid: validation-only
+  password: validation-only-password
+mqtt:
+  id: check_mqtt
+  broker: 127.0.0.1
+external_components:
+  - source: {type: local, path: ../components}
+    components: [communication_net_protocol]
+  - source: {type: local, path: ../../esphome-wifi-espnow-arbitration/components}
+    components: [wifi]
+  - source: {type: local, path: ../../esphome-espnow-net-protocol/components}
+    components: [espnow_net_protocol]
+espnow_net_protocol:
+  id: check_radio
+  channel: 1
+  pmk: '000102030405060708090A0B0C0D0E0F'
+  peers:
+    - id: check_panel_radio
+      address: '02:00:00:00:00:01'
+      lmk: '101112131415161718191A1B1C1D1E1F'
+      application_source_id: check_panel
+packages:
+  cycle: !include
+    file: ../packages/cover_cycle.yaml
+    vars:
+      cycle_binding_id: check_cycle
+      cycle_resource: cover/persiana
+      cycle_cover_id: check_cover
+cover:
+  - platform: time_based
+    id: check_cover
+    open_duration: 19s
+    close_duration: 19s
+    open_action: []
+    close_action: []
+    stop_action: []
+communication_net_protocol:
+  id: check_protocol
+  device_id: check_hub
+  mqtt:
+    mqtt_id: check_mqtt
+    listen_commands: true
+    execute_inbound: true
+    command_target: check_hub
+    source_id: check_panel
+    reply_topic: bench/cover/results
+
+  esp_now:
+    espnow_net_protocol_id: check_radio
+    observe_inbound: true
+    execute_inbound: true
+  policies:
+    - {id: check_policy, transports: [mqtt]}
+  destinations:
+    - {id: check_destination, policy: check_policy, mqtt_target: check_panel}
