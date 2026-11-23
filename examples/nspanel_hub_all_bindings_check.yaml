@@ -556,12 +556,7 @@ communication_net_protocol:
       then:
       - light.turn_on: SaidaLivre4
       - delay: 300ms
-      - light.turn_on:
-          id: FitaSuperior
-          effect: None
-          red: !lambda 'return red / 255.0f;'
-          green: !lambda 'return green / 255.0f;'
-          blue: !lambda 'return blue / 255.0f;'
+      - communication_net_protocol.apply_rgb: {id: FitaSuperior}
       completion:
         light_id: FitaSuperior
         expected: 'on'
@@ -577,9 +572,7 @@ communication_net_protocol:
       then:
       - light.turn_on: SaidaLivre4
       - delay: 300ms
-      - light.turn_on:
-          id: FitaSuperior
-          brightness: !lambda 'return value / 100.0f;'
+      - communication_net_protocol.apply_brightness: {id: FitaSuperior}
       completion:
         light_id: FitaSuperior
         expected: 'on'
@@ -593,9 +586,7 @@ communication_net_protocol:
       arguments: {type: value, min: 0, max: 100}
       interruptible: true
       then:
-      - cover.control:
-          id: persiana
-          position: !lambda 'return value / 100.0f;'
+      - communication_net_protocol.apply_position: {id: persiana}
       completion:
         cover_id: persiana
         expected: position

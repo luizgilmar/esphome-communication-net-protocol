@@ -2,6 +2,9 @@
 
 #include "esphome/core/component.h"
 #include "mqtt_source_registry.h"
+#ifdef USE_COMMUNICATION_NET_ARGUMENT_ACTIONS
+#include "argument_actions.h"
+#endif
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
 #include "transaction_tracker.h"
 #endif

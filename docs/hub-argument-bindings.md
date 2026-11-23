@@ -1,0 +1,64 @@
+# Argumentos dos recursos do HUB — 23/11/2026
+
+## Implementado no componente genérico
+
+As ações communication_net_protocol.apply_rgb, apply_brightness e apply_position
+consomem diretamente a tupla validada do binding de entrada. Não usam valores
+globais nem lambdas no YAML. RGB usa 0..255; brilho 1..100%; posição 0..100%.
+RGB limpa efeito ativo como o executor anterior. Brilho preserva o efeito.
+Posição chama o objeto cover; nunca acessa relés de direção.
+Ações só podem ser geradas no trigger inbound com a assinatura esperada.
+A configuração rejeita tipo/faixa incompatível, inclusive em ações aninhadas.
+Não há arredondamento, clamp ou conversão de um pedido inválido em outro comando.
+
+## Pacotes reutilizáveis
+
+packages/light_argument_bindings.yaml recebe IDs de binding, recurso, escopo de
+execução, luz, alimentação, tempo de estabilização e timeout. Pode ser incluído
+mais de uma vez; Superior/Mesa não estão codificados no componente C++.
+A alimentação liga antes do ajuste e respeita o atraso declarado. O escopo deve
+ser o mesmo dos bindings do grupo e individuais para coordenar a alimentação.
+Este pacote contém apenas RGB/brilho. Os bindings de ligar/desligar/alternar e
+consulta devem ser consolidados com a regra de manter a fonte enquanto outra
+fita estiver ligada; não substituir essa regra ao instalá-lo.
+
+packages/cover_position_binding.yaml recebe recurso, cover e timeout. Deve ser
+combinado com abrir/fechar/parar e cover_cycle.yaml no mesmo recurso. O binding
+stop precisa interrupts_active e completion idle. O ajuste de posição continua
+no time_based cover, inclusive a estimativa por tempo; não implica sensor físico.
+
+## Evidências e limitações
+
+44 testes Python passaram (contrato NSPanel, limites de snapshot, rotas inbound,
+dependencias e schema outbound), incluindo
+sete novos casos de compatibilidade de ações. A geração ESPHome 2026.9.1 passou
+nos perfis nspanel_hub_schema_check e nspanel_hub_argument_packages_check.
+Este último inclui o mesmo pacote duas vezes com luzes independentes e uma fonte
+compartilhada, além do pacote de posição. Só há saídas virtuais; não instalar.
+Os dois perfis de validação antigos tiveram suas conversões migradas para ações.
+O efeito vazio de teste existente em all_bindings ainda é uma lambda herdada;
+não declarar todo esse perfil nem o HUB integralmente migrado.
+
+A tentativa de compilação binária não passou pela preparação do ESP-IDF: o
+ambiente tentou baixá-lo e falhou na resolução de github.com. Não é evidência
+de falha ou sucesso C++ destas ações. Teste de hardware e geração all_bindings
+completa ainda pendentes. Nenhuma referência Git instalada foi alterada,
+nenhum push, firmware ou comando para equipamento real foi enviado.
+
+## Trabalho ainda necessário antes do perfil instalável
+
+- Consolidar os bindings individuais completos de FitaMesa e Superior, mantendo
+  a coordenação da fonte com Meio e o grupo de três fitas.
+- Incorporar ciclo e posição ao perfil real do HUB com o mesmo recurso.
+- Corrigir a associação de banheiro_geral para light/saida_livre_3 no perfil real;
+  o alias de teste light/banheiro_geral não é o binding do HUB atual.
+- Publicar e receber estados individuais; o snapshot legado tem spot, strips,
+  panel1 e panel2. strips agrega três fitas e não representa uma fita individual.
+- O snapshot atual suporta luz/binário, mas não posição/movimento de cover;
+  será preciso estender o contrato ou uma observação tipada, sem inventar campos.
+- O cadastro NSPanel tem adaptador de envio, mas ainda não recebe snapshots do
+  HUB pelo modelo genérico. Reutilizar a infraestrutura de observação já validada
+  no TX, com limites de payload, freshness e recuperação sem rajadas.
+- Publicar versões Git fixas somente após revisão e autorização de publicação.
+
+Estas pendências impedem tratar o perfil full atual como instalável.

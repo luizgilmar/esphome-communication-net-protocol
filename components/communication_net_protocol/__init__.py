@@ -437,6 +437,7 @@ def _validate(config):
             route = (binding[CONF_RESOURCE], binding[CONF_COMMAND])
             completion = binding.get(CONF_COMPLETION, {})
             arguments = binding[CONF_ARGUMENTS]
+            _validate_argument_actions(binding.get("then", []), arguments)
             if arguments["min"] > arguments["max"]:
                 raise cv.Invalid(f"binding {name} arguments.min exceeds max")
             if completion.get(CONF_RGB_FROM_ARGUMENTS, False) and arguments["type"] != "rgb":
@@ -716,3 +717,48 @@ async def to_code(config):
             raise cv.Invalid("composed MQTT outgoing command topic exceeds 192 bytes")
         cg.add(var.set_mqtt_outgoing_topic(command_topic))
         cg.add(var.set_mqtt_outgoing_target(target))
+
+
+# Explicit inbound-argument actions: no templated YAML expressions are needed.
+async def _argument_action_to_code(config, action_id, args):
+    expected = [(cg.uint16, "value"), (cg.uint8, "red"), (cg.uint8, "green"), (cg.uint8, "blue")]
+    if [(str(t), name) for t, name in args] != [(str(t), name) for t, name in expected]:
+        raise cv.Invalid("Argument actions require the communication inbound binding trigger")
+    cg.add_define("USE_COMMUNICATION_NET_ARGUMENT_ACTIONS")
+    return cg.new_Pvariable(action_id, await cg.get_variable(config[CONF_ID]))
+
+
+@automation.register_action("communication_net_protocol.apply_rgb", communication_ns.class_("ArgumentRgbAction", automation.Action), cv.Schema({
+    cv.Required(CONF_ID): cv.use_id(light.LightState),
+}), synchronous=True)
+async def argument_rgb_to_code(config, action_id, template_arg, args):
+    return await _argument_action_to_code(config, action_id, args)
+
+
+@automation.register_action("communication_net_protocol.apply_brightness", communication_ns.class_("ArgumentBrightnessAction", automation.Action), cv.Schema({
+    cv.Required(CONF_ID): cv.use_id(light.LightState),
+}), synchronous=True)
+async def argument_brightness_to_code(config, action_id, template_arg, args):
+    return await _argument_action_to_code(config, action_id, args)
+
+
+@automation.register_action("communication_net_protocol.apply_position", communication_ns.class_("ArgumentPositionAction", automation.Action), cv.Schema({
+    cv.Required(CONF_ID): cv.use_id(cover.Cover),
+}), synchronous=True)
+async def argument_position_to_code(config, action_id, template_arg, args):
+    return await _argument_action_to_code(config, action_id, args)
+
+
+def _validate_argument_actions(node, arguments):
+    if isinstance(node, list):
+        for child in node:
+            _validate_argument_actions(child, arguments)
+    elif isinstance(node, dict):
+        for key, child in node.items():
+            if key == "communication_net_protocol.apply_rgb" and arguments["type"] != "rgb":
+                raise cv.Invalid("apply_rgb requires rgb binding arguments")
+            if key in ("communication_net_protocol.apply_brightness", "communication_net_protocol.apply_position"):
+                minimum = 1 if key.endswith("brightness") else 0
+                if arguments["type"] != "value" or not minimum <= arguments["min"] <= arguments["max"] <= 100:
+                    raise cv.Invalid("Percentage argument action requires compatible value bounds")
+            _validate_argument_actions(child, arguments)

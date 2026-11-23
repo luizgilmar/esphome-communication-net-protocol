@@ -1,0 +1,38 @@
+# Compile-only: virtual outputs, never install on a HUB.
+packages:
+  base: !include nspanel_hub_schema_check.yaml
+  superior_arguments: !include
+    file: ../packages/light_argument_bindings.yaml
+    vars:
+      rgb_binding_id: upper_package_rgb
+      brightness_binding_id: upper_package_brightness
+      light_resource: light/package_upper
+      light_execution_scope: light/shared_supply
+      argument_light_id: check_strip
+      light_supply_id: check_supply
+      light_supply_settle: 300ms
+      light_completion_timeout: 3s
+  mesa_arguments: !include
+    file: ../packages/light_argument_bindings.yaml
+    vars:
+      rgb_binding_id: mesa_package_rgb
+      brightness_binding_id: mesa_package_brightness
+      light_resource: light/package_mesa
+      light_execution_scope: light/shared_supply
+      argument_light_id: check_mesa
+      light_supply_id: check_supply
+      light_supply_settle: 300ms
+      light_completion_timeout: 3s
+  position_arguments: !include
+    file: ../packages/cover_position_binding.yaml
+    vars:
+      position_binding_id: package_position
+      position_resource: cover/package_blind
+      position_cover_id: check_cover
+      position_timeout: 20s
+esphome:
+  name: hub-argument-packages-check
+  build_path: ${protocol_build_root}/esphome-protocol-schema-build/hub-argument-packages-check
+light:
+  - {platform: rgb, id: check_mesa, red: check_output, green: check_output, blue: check_output}
+  - {platform: monochromatic, id: check_supply, output: check_output}

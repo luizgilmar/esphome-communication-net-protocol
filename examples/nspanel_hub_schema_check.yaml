@@ -85,11 +85,7 @@ communication_net_protocol:
         command: rgb
         arguments: {type: rgb}
         then:
-          - light.turn_on:
-              id: check_strip
-              red: !lambda return red / 255.0f;
-              green: !lambda return green / 255.0f;
-              blue: !lambda return blue / 255.0f;
+          - communication_net_protocol.apply_rgb: {id: check_strip}
         completion:
           light_id: check_strip
           expected: 'on'
@@ -100,9 +96,7 @@ communication_net_protocol:
         command: brightness
         arguments: {type: value, min: 1, max: 100}
         then:
-          - light.turn_on:
-              id: check_strip
-              brightness: !lambda return value / 100.0f;
+          - communication_net_protocol.apply_brightness: {id: check_strip}
         completion:
           light_id: check_strip
           expected: 'on'
@@ -114,9 +108,7 @@ communication_net_protocol:
         arguments: {type: value, min: 0, max: 100}
         interruptible: true
         then:
-          - cover.control:
-              id: check_cover
-              position: !lambda return value / 100.0f;
+          - communication_net_protocol.apply_position: {id: check_cover}
         completion:
           cover_id: check_cover
           expected: position

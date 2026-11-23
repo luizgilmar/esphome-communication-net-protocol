@@ -1,0 +1,38 @@
+# Shared argument-bearing bindings for one powered RGB light.
+# Include repeatedly with unique binding IDs and the declared target/supply IDs.
+# State and toggle bindings belong to the resource profile, not this conversion.
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: ${rgb_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: rgb
+        arguments: {type: rgb}
+        then:
+          - light.turn_on: ${light_supply_id}
+          - delay: ${light_supply_settle}
+          - communication_net_protocol.apply_rgb: {id: '${argument_light_id}'}
+        completion:
+          light_id: ${argument_light_id}
+          expected: "on"
+          result_rgb: true
+          rgb_from_arguments: true
+          rgb_light_ids: ['${argument_light_id}']
+          timeout: ${light_completion_timeout}
+      - id: ${brightness_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: brightness
+        arguments: {type: value, min: 1, max: 100}
+        then:
+          - light.turn_on: ${light_supply_id}
+          - delay: ${light_supply_settle}
+          - communication_net_protocol.apply_brightness: {id: '${argument_light_id}'}
+        completion:
+          light_id: ${argument_light_id}
+          expected: "on"
+          result_rgb: true
+          brightness_from_arguments: true
+          brightness_light_ids: ['${argument_light_id}']
+          timeout: ${light_completion_timeout}

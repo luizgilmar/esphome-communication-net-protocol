@@ -69,3 +69,26 @@ def test_argument_completion_configuration_is_checked(schema, change):
         bindings["check_position"]["arguments"]["max"] = 101
     with pytest.raises(cv.Invalid):
         module._validate(config)
+
+
+@pytest.mark.parametrize("action,arguments", [
+    ("apply_rgb", {"type": "value", "min": 0, "max": 100}),
+    ("apply_position", {"type": "rgb", "min": 0, "max": 100}),
+    ("apply_brightness", {"type": "value", "min": 0, "max": 100}),
+    ("apply_position", {"type": "value", "min": 0, "max": 101}),
+])
+def test_argument_actions_reject_incompatible_binding_even_when_nested(schema, action, arguments):
+    module, _ = schema
+    node = [{"if": {"then": [{"communication_net_protocol." + action: {"id": "target"}}]}}]
+    with pytest.raises(cv.Invalid):
+        module._validate_argument_actions(node, arguments)
+
+
+@pytest.mark.parametrize("action,arguments", [
+    ("apply_rgb", {"type": "rgb", "min": 0, "max": 65535}),
+    ("apply_position", {"type": "value", "min": 0, "max": 100}),
+    ("apply_brightness", {"type": "value", "min": 1, "max": 100}),
+])
+def test_argument_actions_accept_their_typed_binding(schema, action, arguments):
+    module, _ = schema
+    module._validate_argument_actions([{"communication_net_protocol." + action: {"id": "target"}}], arguments)

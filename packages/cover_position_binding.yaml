@@ -1,0 +1,15 @@
+# Position belongs to an ESPHome cover, never to its direction relays.
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: ${position_binding_id}
+        resource: ${position_resource}
+        command: position
+        arguments: {type: value, min: 0, max: 100}
+        interruptible: true
+        then:
+          - communication_net_protocol.apply_position: {id: '${position_cover_id}'}
+        completion:
+          cover_id: ${position_cover_id}
+          expected: position
+          timeout: ${position_timeout}
