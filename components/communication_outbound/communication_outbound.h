@@ -92,7 +92,11 @@ class OutboundRuntime : public Component, public CommandSubmissionPort, public S
   }
   Submission submit(const CommandDraft &draft, uint32_t now_ms) override {
     if (!ready_) return {SubmissionStatus::UNAVAILABLE, 0};
-    return service_.submit(draft, now_ms);
+    const auto submitted = service_.submit(draft, now_ms);
+    ESP_LOGI("communication.outbound", "SUBMIT destination=%s resource=%s command=%s status=%u tx=%llu",
+             draft.destination.c_str(), draft.target.resource.c_str(), draft.command.name.c_str(),
+             unsigned(submitted.status), static_cast<unsigned long long>(submitted.transaction_id));
+    return submitted;
   }
   void loop() override { if (ready_) service_.loop(millis()); }
   void on_submission_result(const SubmissionContext &context, const CommandResult &result, bool terminal) override {

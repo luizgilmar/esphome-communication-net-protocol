@@ -179,3 +179,20 @@ direção são campos independentes; a sinalização visual dedicada de direçã
 HMI ainda não foi configurada. 50 testes Python selecionados do protocolo e
 62 do NSPanel passaram; geração dos dois perfis aprovada. Sem compilação binária
 ou teste físico desta revisão, sem publicação Git remota nem upload.
+
+
+## Bancada integrada preparada
+
+O produtor de estados pode receber nspanel_source_id (default painel-gian-porta)
+para que a bancada use sua identidade sem duplicar pacotes. O runtime de envio
+registra SUBMIT com comando/recurso/status/tx; o registro significa só admissão,
+não resultado ou estado. A fixture direct-publisher.yaml da bancada inclui os
+pacotes reais de fitas, cover e snapshots e usa saídas estritamente virtuais.
+O consumer usa os observadores reais e tópicos bench/nspanel-direct/*.
+Um teste manual de 22 casos está em bancada-cc2/tools/testar-direto.ps1;
+consulta ambas as identidades e testa comandos/estado/alimentação/ciclo e
+fallback por desabilitar somente MQTT do consumer, sem depender do HA.
+Compilação e execução dessa bancada continuam pendentes. Geração dos dois perfis
+aprovada; nenhuma gravação foi executada. A preparação também corrigiu o prazo
+curto dos comandos de curso: timeout por operação é agora declarativo no perfil
+NSPanel (25s movimentos, 3s parar/ciclo), sem alterar o prazo 5s das luzes.

@@ -1,5 +1,7 @@
 # Candidate extension: preserves legacy fields and adds individual states.
 # The encrypted peer and MQTT reply source must already exist in the HUB profile.
+substitutions:
+  nspanel_source_id: painel-gian-porta
 communication_net_protocol:
   state_snapshot:
     topic: tx/status/quartogian/lights
@@ -9,4 +11,4 @@ communication_net_protocol:
       - {field: mesa, light_ids: [FitaMesa], rgb: true}
     observers:
       peers:
-        - {peer: '${nspanel_peer_id}', source: painel-gian-porta}
+        - {peer: '${nspanel_peer_id}', source: '${nspanel_source_id}'}
