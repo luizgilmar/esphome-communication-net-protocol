@@ -1,4 +1,6 @@
 #pragma once
+#include "esphome/core/defines.h"
+#ifdef USE_COMMUNICATION_NET_ARGUMENT_ACTIONS
 #include "esphome/core/automation.h"
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/cover/cover.h"
@@ -42,3 +44,4 @@ class ArgumentPositionAction : public Action<uint16_t, uint8_t, uint8_t, uint8_t
   cover::Cover *target_;
 };
 }  // namespace esphome::communication_net_protocol
+#endif  // USE_COMMUNICATION_NET_ARGUMENT_ACTIONS

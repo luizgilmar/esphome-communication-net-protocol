@@ -1,4 +1,6 @@
 #pragma once
+#include "esphome/core/defines.h"
+#ifdef USE_COMMUNICATION_NET_LIGHT_SUPPLIES
 #include <vector>
 #include "esphome/core/automation.h"
 #include "esphome/components/light/light_state.h"
@@ -29,3 +31,4 @@ template<typename... Ts> class ReleaseLightSupplyAction : public Action<Ts...> {
   LightSupplyGroup *group_;
 };
 }  // namespace esphome::communication_net_protocol
+#endif  // USE_COMMUNICATION_NET_LIGHT_SUPPLIES

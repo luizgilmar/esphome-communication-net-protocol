@@ -140,3 +140,17 @@ nova implementação paralela de lease/query/handover. Seu perfil candidato
 está no repositório NSPanel, packages/gian_hub_state_mappings.yaml.
 Cover ainda não tem telemetria nesse formato. Posição/movimento continuam
 pendentes; não afirmar que o estado completo do HUB já foi integrado.
+
+
+## Correção de isolamento library_only (23/11/2026)
+
+O log NSPanel compile-20261123-171445.log falhou no main.cpp ao incluir
+argument_actions.h: light/light_state.h ausente. ESPHome inclui todos os headers
+externos diretamente em esphome.h, portanto a proteção apenas no header pai não
+isolava os novos arquivos. argument_actions.h e powered_light.h agora protegem
+seu próprio conteúdo com os respectivos defines de capacidade, antes de incluir
+luz/cover. O NSPanel library_only não habilita essas ações; o HUB continua
+habilitando-as quando usadas. Não foi acrescentado componente light/cover ao
+NSPanel para contornar o erro. Regressão cobre os dois pontos de entrada.
+Compilação binária de confirmação ainda pendente; não atribuir a falha aos avisos
+de bootloader ou de caminho longo anteriores ao erro fatal.

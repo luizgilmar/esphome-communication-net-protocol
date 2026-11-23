@@ -16,3 +16,13 @@ def test_dependency_selection():
 if __name__ == "__main__":
     test_dependency_selection()
     print("Library-only and inbound dependency selection PASS")
+
+
+def test_optional_actuator_headers_are_guarded_when_esphome_includes_all_headers():
+    # ESPHome includes each external-component header directly in esphome.h;
+    # guarding only the parent header cannot isolate library-only consumers.
+    for name, feature in (("argument_actions.h", "USE_COMMUNICATION_NET_ARGUMENT_ACTIONS"),
+                          ("powered_light.h", "USE_COMMUNICATION_NET_LIGHT_SUPPLIES")):
+        lines = (Path("components/communication_net_protocol") / name).read_text(encoding="utf-8").splitlines()
+        assert lines[:3] == ["#pragma once", '#include "esphome/core/defines.h"', "#ifdef " + feature]
+        assert lines[-1] == "#endif  // " + feature
