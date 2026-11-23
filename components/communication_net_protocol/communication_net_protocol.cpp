@@ -823,8 +823,9 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
       size = std::snprintf(payload, sizeof(payload),
                            "{\"transaction_id\":\"%llu\",\"result\":\"succeeded\","
                            "\"execution\":{\"started\":true},\"remote_state\":{"
-                           "\"complete\":true,\"schema\":\"cover-state/v1\",\"value\":{\"position\":%u,\"operation\":%u}}}",
+                           "\"complete\":true,\"schema\":\"cover-state/v1\",\"data_hex\":\"%02x%02x\",\"value\":{\"position\":%u,\"operation\":%u}}}",
                            static_cast<unsigned long long>(result.transaction_id),
+                           static_cast<unsigned>(state[0]), static_cast<unsigned>(state[1]),
                            static_cast<unsigned>(state[0]), static_cast<unsigned>(state[1]));
     } else if (std::strcmp(remote.schema.c_str(), "rgb-state/v1") == 0 &&
         remote.data.size() == 5) {

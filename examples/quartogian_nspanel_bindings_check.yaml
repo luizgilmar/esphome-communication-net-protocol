@@ -8,6 +8,8 @@ packages:
       nspanel_peer_id: check_panel
 
 esphome:
+  includes:
+    - ../tests/cover_state_decoder_compile.h
   name: gian-hub-bindings-check
   build_path: ${protocol_build_root}/esphome-protocol-schema-build/gian-hub-bindings-check
 light:

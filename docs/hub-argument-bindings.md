@@ -154,3 +154,28 @@ habilitando-as quando usadas. Não foi acrescentado componente light/cover ao
 NSPanel para contornar o erro. Regressão cobre os dois pontos de entrada.
 Compilação binária de confirmação ainda pendente; não atribuir a falha aos avisos
 de bootloader ou de caminho longo anteriores ao erro fatal.
+
+
+## Telemetria independente de cover
+
+cover_observation_binding.yaml expõe uma rota de leitura parametrizada com
+completion expected observed e nenhuma ação no cover. O perfil Gian escolhe
+state/cover/persiana. Dois slots normais permitem leitura enquanto um comando
+acompanha o movimento pela rota cover/persiana. A rota de observação não é um
+atalho para relés. As permissões/origens/peers existentes continuam obrigatórias.
+
+As respostas cover-state/v1 via MQTT agora incluem data_hex além de preservar
+o objeto value anterior. Isso permite ao cliente compartilhado recuperar os
+mesmos dois bytes que recebe pelo rádio, sem alterar state-fields/v2 ou o TX.
+cover_state_decoder.h valida posição 0..100, operação 0..2 e exatamente dois
+bytes. As duas fixtures incluem regressões constexpr para as fronteiras e
+frames inválidos; elas serão verificadas na compilação binária seguinte.
+
+O consumidor genérico nspanel_cover_observer está no repositório NSPanel e usa
+o runtime compartilhado. O perfil consulta a cada 10s com jitter, uma consulta
+pendente e retentativas limitadas. Essa é telemetria por consulta, ainda não
+push/lease de cover. Posição é estimada pelo time_based do HUB. Movimento e
+direção são campos independentes; a sinalização visual dedicada de direção no
+HMI ainda não foi configurada. 50 testes Python selecionados do protocolo e
+62 do NSPanel passaram; geração dos dois perfis aprovada. Sem compilação binária
+ou teste físico desta revisão, sem publicação Git remota nem upload.

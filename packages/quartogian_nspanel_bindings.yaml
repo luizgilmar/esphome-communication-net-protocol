@@ -58,3 +58,9 @@ packages:
       cycle_binding_id: nspanel_persiana_cycle
       cycle_resource: cover/persiana
       cycle_cover_id: persiana
+  persiana_observation: !include
+    file: cover_observation_binding.yaml
+    vars:
+      cover_observation_binding_id: nspanel_persiana_observe
+      cover_observation_resource: state/cover/persiana
+      observed_cover_id: persiana

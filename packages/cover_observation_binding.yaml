@@ -1,0 +1,14 @@
+# Independent read-only route; it does not execute motor actions.
+# Use two normal execution slots in the HUB to observe during a movement.
+communication_net_protocol:
+  inbound:
+    normal_executions: 2
+    bindings:
+      - id: ${cover_observation_binding_id}
+        resource: ${cover_observation_resource}
+        command: get
+        then: []
+        completion:
+          cover_id: ${observed_cover_id}
+          expected: observed
+          timeout: 1s
