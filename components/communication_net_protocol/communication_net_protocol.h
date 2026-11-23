@@ -2,6 +2,9 @@
 
 #include "esphome/core/component.h"
 #include "mqtt_source_registry.h"
+#ifdef USE_COMMUNICATION_NET_LIGHT_SUPPLIES
+#include "powered_light.h"
+#endif
 #ifdef USE_COMMUNICATION_NET_ARGUMENT_ACTIONS
 #include "argument_actions.h"
 #endif

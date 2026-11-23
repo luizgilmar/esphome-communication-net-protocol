@@ -1,0 +1,60 @@
+# Candidate HUB profile: adds individual lights and timed-cover commands.
+# Not an installation entry point. Requires the existing HUB stop binding,
+# communication sources/peers, and shared execution scope on the legacy group.
+communication_net_protocol:
+  light_supplies:
+    - id: quartogian_strip_supply
+      supply_id: SaidaLivre4
+      members: [FitaSuperior, FitaMeio, FitaMesa]
+packages:
+  superior: !include
+    file: powered_rgb_light.yaml
+    vars:
+      rgb_binding_id: nspanel_superior_rgb
+      brightness_binding_id: nspanel_superior_brightness
+      on_binding_id: nspanel_superior_on
+      off_binding_id: nspanel_superior_off
+      toggle_binding_id: nspanel_superior_toggle
+      get_binding_id: nspanel_superior_get
+      light_on_script_id: nspanel_superior_power_on
+      light_off_script_id: nspanel_superior_power_off
+      light_supply_group_id: quartogian_strip_supply
+      light_supply_release_delay: 1100ms
+      light_resource: light/fita_superior
+      light_execution_scope: light/alimentacao_fitas
+      argument_light_id: FitaSuperior
+      light_supply_id: SaidaLivre4
+      light_supply_settle: 300ms
+      light_completion_timeout: 3s
+  mesa: !include
+    file: powered_rgb_light.yaml
+    vars:
+      rgb_binding_id: nspanel_mesa_rgb
+      brightness_binding_id: nspanel_mesa_brightness
+      on_binding_id: nspanel_mesa_on
+      off_binding_id: nspanel_mesa_off
+      toggle_binding_id: nspanel_mesa_toggle
+      get_binding_id: nspanel_mesa_get
+      light_on_script_id: nspanel_mesa_power_on
+      light_off_script_id: nspanel_mesa_power_off
+      light_supply_group_id: quartogian_strip_supply
+      light_supply_release_delay: 1100ms
+      light_resource: light/fita_mesa
+      light_execution_scope: light/alimentacao_fitas
+      argument_light_id: FitaMesa
+      light_supply_id: SaidaLivre4
+      light_supply_settle: 300ms
+      light_completion_timeout: 3s
+  persiana_position: !include
+    file: cover_position_binding.yaml
+    vars:
+      position_binding_id: nspanel_persiana_position
+      position_resource: cover/persiana
+      position_cover_id: persiana
+      position_timeout: 20s
+  persiana_cycle: !include
+    file: cover_cycle.yaml
+    vars:
+      cycle_binding_id: nspanel_persiana_cycle
+      cycle_resource: cover/persiana
+      cycle_cover_id: persiana

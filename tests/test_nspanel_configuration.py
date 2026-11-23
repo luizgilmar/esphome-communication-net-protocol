@@ -92,3 +92,27 @@ def test_argument_actions_reject_incompatible_binding_even_when_nested(schema, a
 def test_argument_actions_accept_their_typed_binding(schema, action, arguments):
     module, _ = schema
     module._validate_argument_actions([{"communication_net_protocol." + action: {"id": "target"}}], arguments)
+
+
+@pytest.mark.parametrize("members", [[], ["lamp", "lamp"], ["source"]])
+def test_light_supply_rejects_missing_duplicate_or_self_members(schema, members):
+    module, _ = schema
+    with pytest.raises(cv.Invalid):
+        module.LIGHT_SUPPLY_SCHEMA({"id": "group", "supply_id": "source", "members": members})
+
+
+def test_light_supply_accepts_multiple_independent_members(schema):
+    module, _ = schema
+    group = module.LIGHT_SUPPLY_SCHEMA({"id": "group", "supply_id": "source", "members": ["upper", "middle", "desk"]})
+    assert len(group["members"]) == 3
+
+
+def test_same_supply_cannot_have_two_partial_groups(schema):
+    module, config = schema
+    config = deepcopy(config)
+    config["light_supplies"] = [
+        {"supply_id": "source", "members": ["upper"]},
+        {"supply_id": "source", "members": ["desk"]},
+    ]
+    with pytest.raises(cv.Invalid, match="complete membership"):
+        module._validate(config)

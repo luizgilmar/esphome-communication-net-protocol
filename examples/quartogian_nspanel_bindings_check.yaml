@@ -1,0 +1,27 @@
+# Compile-only: all physical outputs are virtual. Never install on a HUB.
+packages:
+  base: !include nspanel_hub_schema_check.yaml
+  candidate: !include ../packages/quartogian_nspanel_bindings.yaml
+esphome:
+  name: gian-hub-bindings-check
+  build_path: ${protocol_build_root}/esphome-protocol-schema-build/gian-hub-bindings-check
+light:
+  - {platform: rgb, id: FitaSuperior, red: check_output, green: check_output, blue: check_output}
+  - {platform: rgb, id: FitaMeio, red: check_output, green: check_output, blue: check_output}
+  - {platform: rgb, id: FitaMesa, red: check_output, green: check_output, blue: check_output}
+  - {platform: monochromatic, id: SaidaLivre4, output: check_output}
+cover:
+  - {platform: template, id: persiana, optimistic: true, has_position: true}
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: persiana_stop_fixture
+        resource: cover/persiana
+        command: stop
+        interrupts_active: true
+        then:
+          - cover.stop: persiana
+        completion:
+          cover_id: persiana
+          expected: idle
+          timeout: 1s

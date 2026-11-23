@@ -1,0 +1,82 @@
+# Complete individual powered RGB resource, reusable for each member of a supply.
+# Required IDs/timings/resource/scope are declared by the including profile.
+packages:
+  arguments: !include
+    file: light_argument_bindings.yaml
+    vars:
+      rgb_binding_id: ${rgb_binding_id}
+      brightness_binding_id: ${brightness_binding_id}
+      light_resource: ${light_resource}
+      light_execution_scope: ${light_execution_scope}
+      argument_light_id: ${argument_light_id}
+      light_supply_id: ${light_supply_id}
+      light_supply_settle: ${light_supply_settle}
+      light_completion_timeout: ${light_completion_timeout}
+script:
+  - id: ${light_on_script_id}
+    mode: single
+    then:
+      - light.turn_on: ${light_supply_id}
+      - delay: ${light_supply_settle}
+      - light.turn_on: ${argument_light_id}
+  - id: ${light_off_script_id}
+    mode: single
+    then:
+      - light.turn_off: ${argument_light_id}
+      - delay: ${light_supply_release_delay}
+      - communication_net_protocol.release_light_supply: {id: '${light_supply_group_id}'}
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: ${on_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: "on"
+        then:
+          - script.execute: ${light_on_script_id}
+          - script.wait: ${light_on_script_id}
+        completion:
+          light_id: ${argument_light_id}
+          expected: "on"
+          result_rgb: true
+          timeout: ${light_completion_timeout}
+      - id: ${off_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: "off"
+        then:
+          - script.execute: ${light_off_script_id}
+          - script.wait: ${light_off_script_id}
+        completion:
+          light_id: ${argument_light_id}
+          expected: "off"
+          result_rgb: true
+          timeout: ${light_completion_timeout}
+      - id: ${toggle_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: toggle
+        then:
+          - if:
+              condition: {light.is_on: '${argument_light_id}'}
+              then:
+                - script.execute: ${light_off_script_id}
+                - script.wait: ${light_off_script_id}
+              else:
+                - script.execute: ${light_on_script_id}
+                - script.wait: ${light_on_script_id}
+        completion:
+          light_id: ${argument_light_id}
+          expected: toggled
+          result_rgb: true
+          timeout: ${light_completion_timeout}
+      - id: ${get_binding_id}
+        resource: ${light_resource}
+        execution_scope: ${light_execution_scope}
+        command: get
+        then: []
+        completion:
+          light_id: ${argument_light_id}
+          expected: observed
+          result_rgb: true
+          timeout: ${light_completion_timeout}

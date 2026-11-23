@@ -62,3 +62,46 @@ nenhum push, firmware ou comando para equipamento real foi enviado.
 - Publicar versões Git fixas somente após revisão e autorização de publicação.
 
 Estas pendências impedem tratar o perfil full atual como instalável.
+
+
+## Complemento: comandos individuais e alimentação compartilhada
+
+powered_rgb_light.yaml compõe as conversões e acrescenta on/off/toggle/get.
+IDs de scripts/bindings, recurso, alvo, fonte, escopo e tempos vêm do perfil.
+As sequências usam ações/condições nativas ESPHome, sem lambdas. A regra de
+liberar a fonte está em C++ (LightSupplyGroup): verifica current_values e
+remote_values de todos os membros antes de desligar. Isso preserva alimentação
+na transição de desligamento e diante de um pedido de ligar ainda em transição.
+Se algum membro ainda estiver aceso, a fonte permanece ligada. Não há tentativa
+periódica de corte posterior: uma transição mais longa que o atraso configurado
+pode deixar a fonte ligada com todas apagadas, opção conservadora sem corte
+prematuro. O perfil usa 1100ms de espera; calibrar no hardware se necessário.
+Os grupos exigem membros únicos, não vazios, diferentes da própria fonte;
+uma mesma fonte não pode ter dois grupos parciais no componente.
+
+quartogian_nspanel_bindings.yaml é um candidato de perfil: inclui o mesmo pacote
+para Superior e Mesa, com membros Superior/Meio/Mesa e escopo alimentacao_fitas;
+acrescenta posição e ciclo da persiana. Não redefine abrir/fechar/parar existentes.
+O stop existente precisa continuar interrupts_active com completion idle.
+Este arquivo não foi aplicado ao HUB, nem deve ser anexado às extensões antigas
+que já declaram as mesmas rotas. A migração deve substituir bindings duplicados
+e associar os bindings legados do grupo ao mesmo execution_scope antes de instalar.
+O pacote não intercepta comandos HA diretos às entidades; coordenação fora dos
+bindings e o on_turn_on da alimentação permanecem responsabilidade do perfil.
+
+O exemplo quartogian_nspanel_bindings_check gera o candidato com saídas virtuais,
+incluindo stop correspondente da persiana. A geração C++ ESPHome 2026.9.1 passou;
+49 testes Python passaram, cinco novos para a configuração de alimentação.
+A geração anterior com duas inclusões distintas também passou. Não equivale a
+compilação binária nem teste físico de transições/concorrência.
+
+Para compilar este bloco completo, a partir de qualquer diretório:
+
+```powershell
+& "C:\Users\luizg\OneDrive\projetos\Esphome\esphome-communication-net-protocol\tools\compilar-bindings-hub.ps1"
+```
+
+O script verifica ESPHome 2026.9.1, mantém build/cache/log em AppData fora do
+OneDrive e não possui upload. -OnlyGenerate é a alternativa de geração apenas.
+O firmware resultante usa equipamentos virtuais e não é instalável no HUB.
+Observação de estados e a migração final de escopos/rotas continuam pendentes.

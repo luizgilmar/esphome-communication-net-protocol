@@ -2,9 +2,17 @@
 packages:
   base: !include nspanel_hub_schema_check.yaml
   superior_arguments: !include
-    file: ../packages/light_argument_bindings.yaml
+    file: ../packages/powered_rgb_light.yaml
     vars:
       rgb_binding_id: upper_package_rgb
+      on_binding_id: upper_package_on
+      off_binding_id: upper_package_off
+      toggle_binding_id: upper_package_toggle
+      get_binding_id: upper_package_get
+      light_on_script_id: upper_power_on
+      light_off_script_id: upper_power_off
+      light_supply_group_id: shared_supply_group
+      light_supply_release_delay: 1100ms
       brightness_binding_id: upper_package_brightness
       light_resource: light/package_upper
       light_execution_scope: light/shared_supply
@@ -13,9 +21,17 @@ packages:
       light_supply_settle: 300ms
       light_completion_timeout: 3s
   mesa_arguments: !include
-    file: ../packages/light_argument_bindings.yaml
+    file: ../packages/powered_rgb_light.yaml
     vars:
       rgb_binding_id: mesa_package_rgb
+      on_binding_id: mesa_package_on
+      off_binding_id: mesa_package_off
+      toggle_binding_id: mesa_package_toggle
+      get_binding_id: mesa_package_get
+      light_on_script_id: mesa_power_on
+      light_off_script_id: mesa_power_off
+      light_supply_group_id: shared_supply_group
+      light_supply_release_delay: 1100ms
       brightness_binding_id: mesa_package_brightness
       light_resource: light/package_mesa
       light_execution_scope: light/shared_supply
@@ -36,3 +52,9 @@ esphome:
 light:
   - {platform: rgb, id: check_mesa, red: check_output, green: check_output, blue: check_output}
   - {platform: monochromatic, id: check_supply, output: check_output}
+
+communication_net_protocol:
+  light_supplies:
+    - id: shared_supply_group
+      supply_id: check_supply
+      members: [check_strip, check_mesa]

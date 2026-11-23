@@ -32,7 +32,7 @@ def AUTO_LOAD(config):
     # types in the compiled executor, so it needs their core implementations.
     if config.get("library_only", False):
         return []
-    if "inbound" in config or "state_snapshot" in config:
+    if "inbound" in config or "state_snapshot" in config or "light_supplies" in config:
         return ["light", "binary_sensor", "cover"]
     return []
 
@@ -102,6 +102,25 @@ CommunicationNetProtocolComponent = communication_ns.class_(
 DeclarativeInboundBinding = communication_ns.class_(
     "DeclarativeInboundBinding", automation.Trigger.template(cg.uint16, cg.uint8, cg.uint8, cg.uint8)
 )
+LightSupplyGroup = communication_ns.class_("LightSupplyGroup")
+ReleaseLightSupplyAction = communication_ns.class_("ReleaseLightSupplyAction", automation.Action)
+
+
+def _validate_light_supply(config):
+    names = [str(member) for member in config["members"]]
+    if len(names) != len(set(names)):
+        raise cv.Invalid("Light supply members must be unique")
+    if str(config["supply_id"]) in names:
+        raise cv.Invalid("A light supply cannot be its own member")
+    return config
+
+
+LIGHT_SUPPLY_SCHEMA = cv.All(cv.Schema({
+    cv.Required(CONF_ID): cv.declare_id(LightSupplyGroup),
+    cv.Required("supply_id"): cv.use_id(light.LightState),
+    cv.Required("members"): cv.All(cv.ensure_list(cv.use_id(light.LightState)), cv.Length(min=1, max=16)),
+}), _validate_light_supply)
+
 LightExpectedState = communication_ns.enum("LightExpectedState", is_class=True)
 CoverExpectedState = communication_ns.enum("CoverExpectedState", is_class=True)
 ArgumentKind = communication_ns.enum("ArgumentKind", is_class=True)
@@ -492,6 +511,9 @@ def _validate(config):
                 raise cv.Invalid(
                     f"interrupt binding {binding[CONF_ID]} has no interruptible route for its resource"
                 )
+    supplies = [str(group["supply_id"]) for group in config.get("light_supplies", [])]
+    if len(supplies) != len(set(supplies)):
+        raise cv.Invalid("Each light supply must have one complete membership group")
     configured = {name for name in (CONF_MQTT, CONF_ESP_NOW) if name in config}
     policies = {}
     for policy in config[CONF_POLICIES]:
@@ -529,6 +551,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ESP_NOW): ESPNOW_SCHEMA,
         cv.Optional(CONF_INBOUND): INBOUND_SCHEMA,
         cv.Optional(CONF_STATE_SNAPSHOT): STATE_SNAPSHOT_SCHEMA,
+        cv.Optional("light_supplies", default=[]): cv.All(cv.ensure_list(LIGHT_SUPPLY_SCHEMA), cv.Length(max=8)),
         cv.Required(CONF_POLICIES): cv.All(
             cv.ensure_list(POLICY_SCHEMA), cv.Length(min=1, max=16)
         ),
@@ -610,6 +633,11 @@ async def to_code(config):
                 push[CONF_STARTUP_QUIET].total_milliseconds,
                 push[CONF_STARTUP_SPREAD].total_milliseconds,
             ))
+    for group in config.get("light_supplies", []):
+        cg.add_define("USE_COMMUNICATION_NET_LIGHT_SUPPLIES")
+        supply = cg.new_Pvariable(group[CONF_ID], await cg.get_variable(group["supply_id"]))
+        for member in group["members"]:
+            cg.add(supply.add_member(await cg.get_variable(member)))
     for binding in config.get(CONF_INBOUND, {}).get(CONF_BINDINGS, []):
         cg.add(var.add_inbound_route(binding[CONF_ID], binding[CONF_RESOURCE],
                                      binding[CONF_COMMAND]))
@@ -762,3 +790,10 @@ def _validate_argument_actions(node, arguments):
                 if arguments["type"] != "value" or not minimum <= arguments["min"] <= arguments["max"] <= 100:
                     raise cv.Invalid("Percentage argument action requires compatible value bounds")
             _validate_argument_actions(child, arguments)
+
+
+@automation.register_action("communication_net_protocol.release_light_supply", ReleaseLightSupplyAction, cv.Schema({
+    cv.Required(CONF_ID): cv.use_id(LightSupplyGroup),
+}), synchronous=True)
+async def release_light_supply_to_code(config, action_id, template_arg, args):
+    return cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]))
