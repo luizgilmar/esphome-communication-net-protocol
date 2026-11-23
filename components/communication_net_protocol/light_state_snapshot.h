@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include "snapshot_limits.h"
 #include <cstdint>
 #include "esphome/core/defines.h"
 
@@ -51,7 +52,7 @@ class LightStateSnapshot {
   static constexpr size_t MAX_FIELDS = COMMUNICATION_NET_SNAPSHOT_CAPACITY;
   static_assert(MAX_FIELDS >= 4 && MAX_FIELDS <= 8, "Invalid snapshot capacity");
   static constexpr size_t MAX_LIGHTS = 3;
-  static constexpr size_t MAX_WIRE_PAYLOAD = 448;
+  static constexpr size_t MAX_WIRE_PAYLOAD = MAX_SNAPSHOT_JSON_BYTES + 1;
   struct Value {
     uint8_t known{0};
     uint8_t on{0};

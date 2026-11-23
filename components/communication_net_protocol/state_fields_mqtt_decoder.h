@@ -5,12 +5,13 @@
 #include <string>
 #include "esphome/components/json/json_util.h"
 #include "state_fields_decoder.h"
+#include "snapshot_limits.h"
 #include "outbound_communication_transaction.h"
 
 namespace esphome::communication_net_protocol {
 // MQTT field payload published by LightStateSnapshot; bounded before JSON allocation.
 inline bool decode_state_fields_mqtt(const uint8_t *payload, size_t size, outbound::StateSnapshot &output) {
-  if (payload == nullptr || size == 0 || size > 447) return false;
+  if (payload == nullptr || size == 0 || size > MAX_SNAPSHOT_JSON_BYTES) return false;
   return json::parse_json(payload, size, [&output](JsonObject root) -> bool {
     JsonObjectConst metadata = root["_meta"].as<JsonObjectConst>();
     if (metadata.isNull() || metadata.size() != 3 || !metadata["version"].is<uint32_t>() || metadata["version"].as<uint32_t>() != 2 ||

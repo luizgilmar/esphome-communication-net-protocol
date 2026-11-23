@@ -35,7 +35,7 @@ def test_snapshot_schema_accepts_six_fields_with_individual_rgb(schema):
 def test_snapshot_schema_rejects_payload_overflow(schema):
     module, _ = schema
     fields = [{"field": f"f{i}", "light_ids": [f"light{i}"], "rgb": True}
-              for i in range(4)]
+              for i in range(7)]
     with pytest.raises(cv.Invalid, match="MQTT payload"):
         module.STATE_SNAPSHOT_SCHEMA({"topic": "test/state", "fields": fields})
 

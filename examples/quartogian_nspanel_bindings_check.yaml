@@ -2,10 +2,17 @@
 packages:
   base: !include nspanel_hub_schema_check.yaml
   candidate: !include ../packages/quartogian_nspanel_bindings.yaml
+  states: !include
+    file: ../packages/quartogian_nspanel_states.yaml
+    vars:
+      nspanel_peer_id: check_panel
+
 esphome:
   name: gian-hub-bindings-check
   build_path: ${protocol_build_root}/esphome-protocol-schema-build/gian-hub-bindings-check
 light:
+  - {platform: monochromatic, id: SpotChuveiro, output: check_output}
+  - {platform: monochromatic, id: SaidaLivre3, output: check_output}
   - {platform: rgb, id: FitaSuperior, red: check_output, green: check_output, blue: check_output}
   - {platform: rgb, id: FitaMeio, red: check_output, green: check_output, blue: check_output}
   - {platform: rgb, id: FitaMesa, red: check_output, green: check_output, blue: check_output}
@@ -13,6 +20,12 @@ light:
 cover:
   - {platform: template, id: persiana, optimistic: true, has_position: true}
 communication_net_protocol:
+  state_snapshot:
+    fields:
+      - {field: spot, light_ids: [SpotChuveiro]}
+      - {field: strips, light_ids: [FitaSuperior, FitaMeio, FitaMesa], rgb: true}
+      - {field: panel1, binary_sensor_id: panel_relay_1_state}
+      - {field: panel2, binary_sensor_id: panel_relay_2_state}
   inbound:
     bindings:
       - id: persiana_stop_fixture
@@ -25,3 +38,7 @@ communication_net_protocol:
           cover_id: persiana
           expected: idle
           timeout: 1s
+
+binary_sensor:
+  - {platform: template, id: panel_relay_1_state}
+  - {platform: template, id: panel_relay_2_state}

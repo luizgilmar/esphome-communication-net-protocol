@@ -105,3 +105,38 @@ O script verifica ESPHome 2026.9.1, mantém build/cache/log em AppData fora do
 OneDrive e não possui upload. -OnlyGenerate é a alternativa de geração apenas.
 O firmware resultante usa equipamentos virtuais e não é instalável no HUB.
 Observação de estados e a migração final de escopos/rotas continuam pendentes.
+
+
+## Conexão direta: estados individuais (23/11/2026)
+
+Compilação binária anterior confirmada: compile-20261123-163505.log,
+config_hash 0x54e23493, imagem 882491 bytes, DRAM 72824 (40,3%), flash 48,1%.
+É a validação de bindings anterior à ampliação de snapshot abaixo; sem upload.
+
+A extensão quartogian_nspanel_states.yaml acrescenta general/SaidaLivre3,
+superior/FitaSuperior e mesa/FitaMesa ao snapshot. Os quatro campos legados
+spot/strips/panel1/panel2 são preservados pelo perfil chamador. O peer criptografado
+NSPanel e o roteamento MQTT de respostas precisam ser configurados no perfil;
+o pacote recebe nspanel_peer_id e registra a autorização de observação desse peer.
+Não aplicar duas vezes os campos ou o observer. A fixture já tem origem e peer
+NSPanel declarados, com chaves exclusivamente de teste.
+
+A mensagem completa tem sete campos: pior caso MQTT 536 bytes, rádio 93 bytes.
+O orçamento JSON passou de 447 para 767 bytes, centralizado no header para
+produtor/decoder/NSPanel. Buffer C do produtor 768 bytes; nenhum aumento no
+limite binário de 256 bytes nem mudança de state-fields/v2. O limite de oito
+campos também permanece. Testes rejeitam sete campos todos RGB (acima do JSON),
+nomes que excedam o orçamento de rádio e divergência entre limites Python/C++.
+O TX atual recebe apenas campos próprios e ignora adicionais (fonte local
+retained_state_observer.cpp conferida); compatibilidade física ainda a testar.
+O aumento do produtor é 320 bytes de buffer temporário; o NSPanel tem mais
+320 bytes por mailbox MQTT e 320 no temporário de processamento, com quatro
+mailboxes alocadas no modelo atual. Medir a RAM real na próxima compilação.
+
+51 testes Python de protocolo passaram. A geração C++ do HUB com sete campos
+passou no ESPHome 2026.9.1. Essa revisão ainda não foi compilada em binário.
+O receptor nspanel_snapshot já existia e foi validado na bancada; não houve
+nova implementação paralela de lease/query/handover. Seu perfil candidato
+está no repositório NSPanel, packages/gian_hub_state_mappings.yaml.
+Cover ainda não tem telemetria nesse formato. Posição/movimento continuam
+pendentes; não afirmar que o estado completo do HUB já foi integrado.

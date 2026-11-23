@@ -3,7 +3,7 @@ import json
 
 MAX_FIELDS = 8
 MAX_BINARY_BYTES = 256
-MAX_JSON_BYTES = 447  # 448-byte C buffer, including terminating NUL.
+MAX_JSON_BYTES = 767  # Must match MAX_SNAPSHOT_JSON_BYTES in snapshot_limits.h.
 
 
 def snapshot_sizes(fields):
