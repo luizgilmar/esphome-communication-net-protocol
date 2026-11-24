@@ -333,7 +333,7 @@ INBOUND_BINDING_SCHEMA = automation.validate_automation({
 INBOUND_SCHEMA = cv.Schema({
     cv.Optional("normal_executions", default=1): cv.int_range(min=1, max=2),
     cv.Required(CONF_BINDINGS): cv.All(
-        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=40)
+        cv.ensure_list(INBOUND_BINDING_SCHEMA), cv.Length(min=1, max=64)
     ),
 })
 

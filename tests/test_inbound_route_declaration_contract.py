@@ -8,7 +8,7 @@ def test_route_declaration_supports_bounded_active_execution():
     schema = (ROOT / "components/communication_net_protocol/__init__.py").read_text()
     source = (ROOT / "components/communication_net_protocol/communication_net_protocol.cpp").read_text()
     assert 'cv.Optional(CONF_INBOUND): INBOUND_SCHEMA' in schema
-    assert 'cv.Length(min=1, max=40)' in schema
+    assert 'cv.Length(min=1, max=64)' in schema
     assert 'duplicate inbound binding' in schema
     assert 'var.add_inbound_route' in schema
     assert 'automation.validate_automation' in schema
@@ -65,3 +65,17 @@ def test_interruptible_inbound_is_opt_in_and_transaction_aware():
     assert 'has_result(uint64_t transaction_id) const override' in header
     assert 'take_result(uint64_t transaction_id,' in header
     assert 'NetErrorCode::INTERRUPTED' in source
+
+
+
+def test_declared_capacity_accepts_45_and_64_but_rejects_65():
+    import ast
+    import pytest
+    import esphome.config_validation as cv
+    tree=ast.parse((ROOT/"components/communication_net_protocol/__init__.py").read_text(encoding="utf-8"))
+    schema=next(n for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="INBOUND_SCHEMA" for t in n.targets))
+    call=next(n for n in ast.walk(schema) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="Length")
+    bound=cv.Length(**{k.arg:ast.literal_eval(k.value) for k in call.keywords})
+    for size in (45,64):assert len(bound([None]*size))==size
+    for size in (0,65):
+        with pytest.raises(cv.Invalid):bound([None]*size)

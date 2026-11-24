@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstring>
+#include <cstdio>
 
 #include "../components/communication_net_protocol/inbound_route_registry.h"
 
@@ -44,6 +45,20 @@ int main() {
   assert(expanded.size() == 20);
   assert(std::strcmp(expanded.find("light/group", "br100"), "br100") == 0);
   assert(!expanded.add("overflow", "light/group", "overflow"));
+
+  // Admission concurrency is independent of declaration capacity.
+  InboundRouteRegistry<64> maximum;
+  char names[64][16]{};
+  for (size_t i = 0; i < 64; ++i) {
+    std::snprintf(names[i], sizeof(names[i]), "route_%u", unsigned(i));
+    assert(maximum.add(names[i], "light/capacity", names[i]));
+    if (i == 44) assert(maximum.size() == 45);
+  }
+  assert(maximum.size() == 64);
+  assert(maximum.find_index("light/capacity", "route_63") == 63);
+  assert(maximum.id_at(63) == names[63]);
+  assert(!maximum.add("overflow", "light/capacity", "overflow"));
+  assert(!maximum.add("duplicate", "light/capacity", "route_63"));
 
   static_assert(sizeof(InboundRouteRegistry<1>) <= 32,
                 "route declarations must store references, not text copies");

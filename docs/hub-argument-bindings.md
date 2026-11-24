@@ -296,3 +296,24 @@ Quatro testes de merge/preservação no repositório TX passaram, incluindo nome
 que determinam restauração de posição, TX, escopo sem alterar ações e inclusão
 das cinco rotas ausentes. Isso não é compilação completa do HUB no ambiente HA.
 Compilar e conferir o resultado antes de qualquer upload.
+
+
+## Capacidade do cadastro: HUB real com 45 comandos
+
+O aviso HA "length of value must be at most 40" corresponde ao limite da lista
+inbound.bindings. A expansão do arquivo instalado soma 25 bindings existentes,
+5 binários novos, 12 das duas fitas individuais e 3 de cover: total 45.
+A comparação anterior de merge não havia expandido todos os pacotes aninhados;
+foi acrescentada uma verificação dessa composição completa.
+
+Schema e static_assert do InboundRouteRegistry agora permitem até 64 entradas.
+COMMUNICATION_NET_INBOUND_CAPACITY continua sendo gerado com o comprimento real
+da lista (45 aqui), sem reservar 64 em todos os dispositivos. normal_executions
+continua 2, filas/replay/tentativas e a via de interrupção não foram ampliados.
+Isso amplia o cadastro, não o paralelismo. Novos comandos ainda precisam dos
+seus objetos/ações; conferir RAM na compilação real do HUB.
+
+Três testes Python do contrato/capacidade e cinco do overlay do HUB passaram.
+Fronteiras 45/64 aceitas e 0/65 recusadas; o teste nativo inclui preenchimento e
+recusa de overflow em 64. Este último passou somente em syntax-only com Clang,
+não foi executado como binário. Compilação binária do HUB no HA permanece pendente.
