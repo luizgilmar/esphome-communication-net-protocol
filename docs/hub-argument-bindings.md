@@ -260,3 +260,12 @@ projeção e interrupção passaram com Clang em modo syntax-only. O executável
 nativo do serviço não pôde ser executado neste ambiente; sua regressão não está
 aprovada como teste comportamental. Compilação binária ESP32 e teste de 27 casos
 nas placas permanecem pendentes. Nenhum upload ou push Git foi executado.
+
+### Correção de exportação do cabeçalho (24/11/2026)
+
+O build publisher compile-20261124-114048.log falhou por ausência de
+motion_cover/motion_cover.h. A plataforma é carregada de motion_cover/cover;
+o cabeçalho foi movido para essa pasta e o include do publisher foi corrigido.
+Geração do HUB e publisher aprovada, presença do cabeçalho e ambos os includes
+conferidos na árvore gerada. Seis testes de schema passaram. Repetir compilação
+binária somente do publisher; compilação binária desta correção ainda pendente.

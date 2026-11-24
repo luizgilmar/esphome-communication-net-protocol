@@ -10,7 +10,7 @@
 #include "esphome/core/preferences.h"
 #include "esphome/core/log.h"
 #include "esphome/components/mqtt/mqtt_client.h"
-#include "esphome/components/motion_cover/motion_cover.h"
+#include "esphome/components/motion_cover/cover/motion_cover.h"
 #include "esphome/components/communication_net_protocol/cover_motion_publication.h"
 #include "esphome/components/communication_net_protocol/state_traffic_scheduler.h"
 namespace esphome::cover_motion_publisher {
