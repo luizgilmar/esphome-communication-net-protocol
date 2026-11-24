@@ -269,3 +269,30 @@ o cabeçalho foi movido para essa pasta e o include do publisher foi corrigido.
 Geração do HUB e publisher aprovada, presença do cabeçalho e ambos os includes
 conferidos na árvore gerada. Seis testes de schema passaram. Repetir compilação
 binária somente do publisher; compilação binária desta correção ainda pendente.
+
+
+## Pacote de migração conferido contra o HUB instalado
+
+A configuração enviada em 24/11/2026 tem 1213 linhas e difere da base candidata
+somente pela ausência de cinco bindings: wardrobe_on/off e
+bathroom_general_on/off/toggle. A base de controle foi alinhada ao arquivo
+instalado; esses cinco bindings agora pertencem ao pacote de migração
+packages/quartogian_nspanel_installation.yaml deste repositório.
+
+O pacote inclui os bindings individuais, campos de estado e eventos de cover
+por includes relativos no próprio Git. Acrescenta origem MQTT/reply e peer do
+NSPanel; preserva TX. Os 19 bindings do grupo existente recebem o mesmo escopo
+das operações individuais. O proxy público persiana preserva nome e o backend
+interno recebe ações e durações da configuração anterior.
+
+Consumidor HA: incluir esse pacote remoto por commit fixo e atualizar a fonte
+external_components do protocolo para o core testado 234bc9d, com
+[communication_net_protocol, motion_cover, cover_motion_publisher]. O pacote
+não muda fontes de Wi-Fi/rádio, SX1509, efeitos existentes ou secrets do HUB.
+Adicionar ao secrets do HA a mesma espnow_hub_nspanel_lmk preparada no NSPanel.
+Não copiar fontes dos componentes para my_components.
+
+Quatro testes de merge/preservação no repositório TX passaram, incluindo nomes
+que determinam restauração de posição, TX, escopo sem alterar ações e inclusão
+das cinco rotas ausentes. Isso não é compilação completa do HUB no ambiente HA.
+Compilar e conferir o resultado antes de qualquer upload.

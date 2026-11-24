@@ -1,0 +1,132 @@
+# Installation overlay for the existing Quartogian HUB; requires core 234bc9d or later.
+# Keep existing calibration, TX peer, legacy bindings, and all hardware includes.
+packages:
+  direct_bindings: !include quartogian_nspanel_bindings.yaml
+  direct_states: !include
+    file: quartogian_nspanel_states.yaml
+    vars:
+      nspanel_peer_id: nspanel_gian_porta
+  motion_events: !include quartogian_cover_motion.yaml
+communication_net_protocol:
+  mqtt:
+    sources:
+      - source_id: painel-gian-porta
+        reply_topic: tx/results/painel-gian-porta
+  inbound:
+    bindings:
+      # NSPanel: Geral do banheiro. Nao confundir com o Chuveiro Tuya.
+      - id: bathroom_general_on
+        resource: light/saida_livre_3
+        command: "on"
+        then:
+          - light.turn_on: SaidaLivre3
+        completion:
+          light_id: SaidaLivre3
+          expected: "on"
+          timeout: 2s
+      - id: bathroom_general_off
+        resource: light/saida_livre_3
+        command: "off"
+        then:
+          - light.turn_off: SaidaLivre3
+        completion:
+          light_id: SaidaLivre3
+          expected: "off"
+          timeout: 2s
+      - id: bathroom_general_toggle
+        resource: light/saida_livre_3
+        command: toggle
+        then:
+          - light.toggle: SaidaLivre3
+        completion:
+          light_id: SaidaLivre3
+          expected: toggled
+          timeout: 2s
+      # Nome legado: esta saida e Armario, conforme teste fisico do usuario.
+      - id: wardrobe_on
+        resource: light/spot_chuveiro
+        command: "on"
+        then:
+          - light.turn_on: SpotChuveiro
+        completion:
+          light_id: SpotChuveiro
+          expected: "on"
+          timeout: 2s
+      - id: wardrobe_off
+        resource: light/spot_chuveiro
+        command: "off"
+        then:
+          - light.turn_off: SpotChuveiro
+        completion:
+          light_id: SpotChuveiro
+          expected: "off"
+          timeout: 2s
+      - id: !extend strips_off
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_activate
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_reapply
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_deactivate
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_warm_white
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_red
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_green
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_blue
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_yellow
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_cyan
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_color_magenta
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_12
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_18
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_27
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_40
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_65
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_brightness_100
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_rainbow
+        execution_scope: light/alimentacao_fitas
+      - id: !extend strips_toggle
+        execution_scope: light/alimentacao_fitas
+espnow_net_protocol:
+  peers:
+    - id: nspanel_gian_porta
+      address: '24:D7:EB:0D:CF:00'
+      application_source_id: painel-gian-porta
+      lmk: !secret espnow_hub_nspanel_lmk
+cover:
+  - id: !extend persiana
+    platform: motion_cover
+    backend_id: persiana_motor
+    open_action: !remove
+    close_action: !remove
+    stop_action: !remove
+    open_duration: !remove
+    close_duration: !remove
+  - platform: time_based
+    id: persiana_motor
+    # Preserve the native restore preference identity.
+    name: Persiana Gian
+    internal: true
+    open_action:
+      - light.turn_off: SaidaLivre6
+      - light.turn_on: SaidaLivre5
+    open_duration: ${persiana_open_duration}
+    close_action:
+      - light.turn_off: SaidaLivre5
+      - light.turn_on: SaidaLivre6
+    close_duration: ${persiana_close_duration}
+    stop_action:
+      - light.turn_off: SaidaLivre5
+      - light.turn_off: SaidaLivre6
