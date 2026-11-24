@@ -86,6 +86,34 @@ CommandDraft draft(const char *destination, const char *device, const char *reso
 
 int main() {
   {
+    // Reproduce the mixed-policy occupancy reported by the two-board bench.
+    struct FakeRadio : FakeTransport {
+      CommunicationTransport transport_type() const override { return CommunicationTransport::ESP_NOW; }
+    } normal_radio, interrupt_radio;
+    Fixture f;
+    assert(f.a.register_transport(&normal_radio));
+    assert(f.c.register_transport(&interrupt_radio));
+    CommunicationPolicy automatic, mqtt_read;
+    assert(automatic.add_transport(CommunicationTransport::MQTT));
+    assert(automatic.add_transport(CommunicationTransport::ESP_NOW));
+    assert(mqtt_read.add_transport(CommunicationTransport::MQTT));
+    assert(f.service.add_policy("automatic", automatic));
+    assert(f.service.add_policy("mqtt_read", mqtt_read));
+    assert(f.service.add_destination("route_auto", "hub_a", "automatic"));
+    auto moving = draft("route_auto", "hub_a", "cover/blind", "open");
+    assert(f.service.submit(moving, 0).status == SubmissionStatus::ADMITTED);
+    auto query = draft("route_auto", "hub_a", "state/cover/blind", "get");
+    assert(f.service.submit(query, 1).status == SubmissionStatus::UNAVAILABLE);
+    query.observation_policy.assign("mqtt_read");
+    assert(f.service.submit(query, 2).status == SubmissionStatus::ADMITTED);
+    assert(std::strcmp(f.second.sent.target.resource.c_str(), "state/cover/blind") == 0);
+    auto stop = draft("route_auto", "hub_a", "cover/blind", "stop");
+    stop.kind = SubmissionKind::PRIORITY_INTERRUPT;
+    assert(f.service.submit(stop, 3).status == SubmissionStatus::ADMITTED);
+    query.command.name.assign("open");
+    assert(f.service.submit(query, 4).status == SubmissionStatus::INVALID);
+  }
+  {
     Fixture f;
     CommunicationPolicy probe;
     assert(probe.add_transport(CommunicationTransport::MQTT));

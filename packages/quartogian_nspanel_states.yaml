@@ -11,4 +11,4 @@ communication_net_protocol:
       - {field: mesa, light_ids: [FitaMesa], rgb: true}
     observers:
       peers:
-        - {peer: '${nspanel_peer_id}', source: '${nspanel_source_id}'}
+        - {peer: '${nspanel_peer_id}', source: '${nspanel_source_id}', cover_resources: [cover/persiana]}

@@ -1,0 +1,11 @@
+substitutions:
+  cover_motion_protocol_id: command_probe
+  cover_motion_topic: tx/status/quartogian/cover/persiana
+cover_motion_publisher:
+  protocol_id: ${cover_motion_protocol_id}
+  sources:
+    - cover_id: persiana
+      resource: cover/persiana
+      query_resource: state/cover/persiana
+      topic: ${cover_motion_topic}
+      heartbeat: 60s

@@ -196,3 +196,67 @@ Compilação e execução dessa bancada continuam pendentes. Geração dos dois 
 aprovada; nenhuma gravação foi executada. A preparação também corrigiu o prazo
 curto dos comandos de curso: timeout por operação é agora declarativo no perfil
 NSPanel (25s movimentos, 3s parar/ciclo), sem alterar o prazo 5s das luzes.
+
+
+## Resultado parcial da bancada e correção de concorrência (23/11/2026)
+
+O teste direct-test-20261123-182132.log aprovou os primeiros 11 casos (luzes,
+cor/brilho, fonte compartilhada, binários e cover fechado) e parou em abertura.
+A abertura foi executada e concluída, mas consultas state/cover/persiana foram
+recusadas localmente com status UNAVAILABLE enquanto o comando longo ocupava a
+primeira via. A segunda via possui apenas MQTT: não aceita a política mista de
+comandos que também exige adaptador de rádio, mesmo com broker disponível.
+Não foi falha de movimento, timeout curto ou payload do HUB.
+
+A correção permite override de política para state/cover/... exclusivamente em
+get sem argumentos. O observador compartilha a prova de saúde MQTT do receptor
+já existente: usa a política MQTT dedicada quando fresca, ou a política rádio
+quando não. A via reservada de parada não é usada para consultas. Nenhum novo
+adaptador ESP-NOW ou slot foi acrescentado. O receptor de cover e o perfil NSPanel
+foram ajustados; o publisher de bancada não precisa ser recompilado/gravadado.
+
+A regressão nativa outbound_command_service_test.cpp reproduz a recusa com
+política mista e verifica admissão MQTT independente e STOP ainda reservado;
+foi acrescentada, mas não executada localmente por ausência de compilador host.
+A confirmação operacional é o próximo teste das duas placas. No modo somente
+ESP-NOW, leitura durante comando longo ainda pode esperar a liberação da via
+normal. Isso continua uma limitação pendente; não reclassificar os 11 PASS como
+22 PASS nem afirmar telemetria de movimento offline validada.
+
+
+## Movimento por eventos — revisão de 24/11/2026
+
+Esta revisão substitui a consulta periódica do perfil Gian descrita acima.
+Os dois firmwares da bancada precisam recompilar; o HUB instalado não foi alterado.
+`motion_cover` mantém um cover público e encaminha comandos para um `time_based`
+interno. Os tempos são obtidos da configuração desse backend, sem repetir a
+calibração, acessar membros privados ou copiar o componente nativo. Teclas,
+HA/API e protocolo devem usar o ID público; o backend é interno e tem um único
+proprietário. Um acesso direto ao backend perde o plano e não produz destino inventado.
+
+`cover_motion_publisher` publica início, inversão/novo destino, parada e término,
+com heartbeat de 60s no perfil. O frame `cover-motion/v1` contém geração persistida,
+revisão, ID do movimento, recurso, posição/destino em centésimos de percentual,
+operação e duração restante. O frame é amostrado no momento do envio. Não exige
+relógios sincronizados; atraso de transporte afeta a estimativa visual. Posição
+continua estimada pelo time_based, não medida por sensor.
+
+MQTT usa tópico próprio, QoS1 e retained; retained não substitui consulta fresca
+no consumidor. ESP-NOW entrega somente aos peers com lease e interesse explícito
+`cover_resources`. Luzes e covers compartilham o orçamento global do agendador,
+com coalescência por peer/recurso, limites por nó/peer e recuo após falha. Não há
+publicação de posição a cada 2s. O envio de estado pode ocorrer durante movimento
+normal; resultados prontos e STOP têm precedência na admissão. Isto ainda precisa
+ser confirmado nas placas. TX sem interesse declarado continua recebendo só luzes.
+
+Uma parada/alteração externa encerra o acompanhamento antigo com INTERRUPTED,
+sem parar o novo comando do outro controlador nem aguardar o timeout anterior.
+O serviço conserva a consulta somente-leitura para sincronização/recuperação;
+ela usa a política dedicada e não ocupa a via reservada para STOP.
+
+Validação desta revisão: 44 testes Python selecionados do protocolo e geração
+C++ do perfil HUB e das duas placas aprovados. Checagens constexpr do codec,
+projeção e interrupção passaram com Clang em modo syntax-only. O executável
+nativo do serviço não pôde ser executado neste ambiente; sua regressão não está
+aprovada como teste comportamental. Compilação binária ESP32 e teste de 27 casos
+nas placas permanecem pendentes. Nenhum upload ou push Git foi executado.

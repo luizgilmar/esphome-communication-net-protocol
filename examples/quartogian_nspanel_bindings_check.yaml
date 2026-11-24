@@ -1,5 +1,8 @@
 # Compile-only: all physical outputs are virtual. Never install on a HUB.
+substitutions:
+  cover_motion_protocol_id: check_protocol
 packages:
+  motion_events: !include ../packages/quartogian_cover_motion.yaml
   base: !include nspanel_hub_schema_check.yaml
   candidate: !include ../packages/quartogian_nspanel_bindings.yaml
   states: !include
@@ -7,9 +10,12 @@ packages:
     vars:
       nspanel_peer_id: check_panel
 
+external_components:
+  - source: {type: local, path: ../components}
+    components: [motion_cover, cover_motion_publisher]
 esphome:
   includes:
-    - ../tests/cover_state_decoder_compile.h
+    - ../tests/cover_motion_model_compile.h
   name: gian-hub-bindings-check
   build_path: ${protocol_build_root}/esphome-protocol-schema-build/gian-hub-bindings-check
 light:
@@ -20,7 +26,16 @@ light:
   - {platform: rgb, id: FitaMesa, red: check_output, green: check_output, blue: check_output}
   - {platform: monochromatic, id: SaidaLivre4, output: check_output}
 cover:
-  - {platform: template, id: persiana, optimistic: true, has_position: true}
+  - {platform: motion_cover, id: persiana, name: Fixture Cover, backend_id: persiana_motor}
+  - platform: time_based
+    id: persiana_motor
+    internal: true
+    name: Fixture Cover
+    open_duration: 19s
+    close_duration: 19s
+    open_action: []
+    close_action: []
+    stop_action: []
 communication_net_protocol:
   state_snapshot:
     fields:

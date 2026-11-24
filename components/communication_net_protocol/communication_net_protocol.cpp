@@ -171,7 +171,13 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
 #else
   const bool observation_control = false;
 #endif
-  if (snapshot_query || observation_control) {
+#ifdef USE_COVER_MOTION_PUBLISHER
+  const int motion_index=cover_motion_!=nullptr && device_id_!=nullptr && std::strcmp(command.device_id.c_str(),device_id_)==0 && std::strcmp(command.name.c_str(),"get")==0 ? cover_motion_->query_index(command.resource.c_str()) : -1;
+  const bool motion_query=motion_index>=0;
+#else
+  const bool motion_query=false;
+#endif
+  if (snapshot_query || observation_control || motion_query) {
     if (arguments.kind != ArgumentKind::NONE) return NetStart::INVALID_COMMAND;
     if (this->normal_->inbound_active_ || this->normal_->radio_result_ready_ ||
         this->normal_->mqtt_result_ready_
@@ -187,6 +193,10 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
     bool written=false;
 #ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
     if(observation_control) written=state_observers_.control(verified_peer_,command,now_ms,state_snapshot_,result);
+    else
+#endif
+#ifdef USE_COVER_MOTION_PUBLISHER
+    if(motion_query)written=cover_motion_->write_motion(size_t(motion_index),result.remote_state);
     else
 #endif
       written=this->state_snapshot_.write_remote_state(result.remote_state);
@@ -374,6 +384,7 @@ NetStart CommunicationNetProtocolComponent::start_normal_(
   this->normal_->active_command_ = command;
   this->normal_->active_binding_ = binding;
   this->normal_->inbound_started_ms_ = now_ms;
+  this->normal_->cover_progress_ = {};
   this->normal_->inbound_timeout_ms_ = binding->completion_timeout();
   this->normal_->radio_waiting_ = radio;
   this->normal_->mqtt_waiting_ = !radio;
@@ -496,6 +507,17 @@ void CommunicationNetProtocolComponent::loop_normal_(uint32_t now_ms) {
     else if (this->normal_->active_binding_->cover_expected() == CoverExpectedState::POSITION)
       completed &= state->position >= this->normal_->active_binding_->expected_position() - 0.01f &&
                    state->position <= this->normal_->active_binding_->expected_position() + 0.01f;
+    uint32_t movement=0;
+#ifdef USE_COVER_MOTION_PUBLISHER
+    if(cover_motion_!=nullptr)movement=cover_motion_->movement_for(state);
+#endif
+    if(cover_was_interrupted(this->normal_->cover_progress_,uint8_t(state->current_operation),movement,completed)) {
+      NetResult interrupted{};interrupted.transaction_id=this->normal_->active_command_.transaction_id;
+      interrupted.execution.started=true;interrupted.latency_ms=now_ms-this->normal_->inbound_started_ms_;
+      interrupted.status=NetStatus::FAILED;interrupted.error.code=espnow_net_protocol::NetErrorCode::INTERRUPTED;
+      interrupted.error.message.assign("cover changed by another controller");
+      write_cover_state(state,interrupted.remote_state);this->finish_inbound_(interrupted);return;
+    }
   } else {
     completed = this->normal_->active_binding_->binary_sensor() == nullptr ||
                 (this->normal_->active_binding_->binary_sensor()->has_state() &&
@@ -791,7 +813,8 @@ void CommunicationNetProtocolComponent::publish_normal_result_() {
     const auto &remote = result.remote_state;
     const bool on = remote.data.size() >= 1 && remote.data.data()[0] == 1;
     if ((std::strcmp(remote.schema.c_str(), "state-fields/v1") == 0 ||
-         std::strcmp(remote.schema.c_str(), "state-fields/v2") == 0) &&
+         std::strcmp(remote.schema.c_str(), "state-fields/v2") == 0 ||
+         std::strcmp(remote.schema.c_str(), "cover-motion/v1") == 0) &&
         remote.data.size() != 0) {
       static constexpr char DIGITS[] = "0123456789abcdef";
       size = std::snprintf(payload, sizeof(payload),
@@ -882,7 +905,13 @@ void CommunicationNetProtocolComponent::loop() {
   this->state_snapshot_.loop(millis(), this->mqtt_wire_);
 #ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
   bool observation_idle=true;
-  for(const auto &slot:normal_executions_) observation_idle &= normal_available_(slot);
+  for(const auto &slot:normal_executions_) {
+#ifdef USE_COVER_MOTION_PUBLISHER
+    observation_idle &= !slot.radio_result_ready_ && !slot.mqtt_result_ready_;
+#else
+    observation_idle &= normal_available_(slot);
+#endif
+  }
 #ifdef USE_COMMUNICATION_NET_INTERRUPTIBLE_INBOUND
   observation_idle &= !interrupt_active_ && !interrupt_radio_result_ready_ && !interrupt_mqtt_result_ready_;
 #endif

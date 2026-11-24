@@ -87,7 +87,10 @@ class CommandSubmissionService : public CommandSubmissionPort {
       return {SubmissionStatus::INVALID, 0};
     if (!draft.observation_policy.empty() &&
         std::strcmp(draft.target.resource.c_str(), "state/snapshot") != 0 &&
-        std::strcmp(draft.target.resource.c_str(), "state/observation/v1") != 0) return {SubmissionStatus::INVALID, 0};
+        std::strcmp(draft.target.resource.c_str(), "state/observation/v1") != 0 &&
+        !(std::strncmp(draft.target.resource.c_str(), "state/cover/", 12) == 0 &&
+          std::strcmp(draft.command.name.c_str(), "get") == 0 && arguments.kind == ArgumentKind::NONE))
+      return {SubmissionStatus::INVALID, 0};
     const char *policy_id = draft.observation_policy.empty() ? destination->policy.c_str() : draft.observation_policy.c_str();
     const auto *policy = policy_(policy_id);
     if (boot_id_ == 0 || policy == nullptr) return {SubmissionStatus::UNAVAILABLE, 0};

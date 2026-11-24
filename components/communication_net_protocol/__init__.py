@@ -17,6 +17,8 @@ def _validate_observer_peers(config):
     radio=fv.full_config.get().get("espnow_net_protocol", {})
     peers={peer["id"]: peer for peer in radio.get("peers", [])}
     for observer in observers["peers"]:
+        if observer.get("cover_resources") and not fv.full_config.get().get("cover_motion_publisher"):
+            raise cv.Invalid("Cover stream interests require a configured motion publisher")
         peer=peers.get(observer["peer"])
         if peer is None or peer.get("application_source_id") != observer["source"]:
             raise cv.Invalid("observer peer/source must match radio application_source_id")
@@ -385,6 +387,7 @@ STATE_SNAPSHOT_SCHEMA = cv.Schema({
         cv.Required("peers"): cv.All(cv.ensure_list(cv.Schema({
             cv.Required("peer"): _identifier(63, "observer peer"),
             cv.Required("source"): _identifier(63, "observer source"),
+            cv.Optional("cover_resources", default=[]): cv.All(cv.ensure_list(_identifier(63, "cover resource")), cv.Length(max=8)),
         })), cv.Length(min=1,max=8)),
         cv.Optional("validity", default="60s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=30000),max=cv.TimePeriod(milliseconds=300000))),
         cv.Optional("node_interval", default="1s"): cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(milliseconds=500),max=cv.TimePeriod(milliseconds=10000))),

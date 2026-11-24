@@ -2,6 +2,9 @@
 
 #include "esphome/core/component.h"
 #include "mqtt_source_registry.h"
+#ifdef USE_COVER_MOTION_PUBLISHER
+#include "cover_motion_publication.h"
+#endif
 #ifdef USE_COMMUNICATION_NET_LIGHT_SUPPLIES
 #include "powered_light.h"
 #endif
@@ -21,6 +24,7 @@
 #include "esphome/components/espnow_net_protocol/result_codec.h"
 #endif
 #include "declarative_inbound_binding.h"
+#include "cover_completion_lifecycle.h"
 #include "passive_inbound_inspector.h"
 #endif
 #ifdef USE_COMMUNICATION_NET_ESPNOW_OBSERVER
@@ -52,6 +56,19 @@ class CommunicationNetProtocolComponent : public Component
 #endif
 {
  public:
+#ifdef USE_COVER_MOTION_PUBLISHER
+  void set_cover_motion_publisher(CoverMotionPublications *publisher) {
+    cover_motion_=publisher;
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+    state_observers_.set_motion_publisher(publisher);
+#endif
+  }
+  void add_observer_cover_stream(const char *peer,size_t index) {
+#ifdef USE_COMMUNICATION_NET_STATE_OBSERVERS
+    state_observers_.add_peer_motion(peer,index);
+#endif
+  }
+#endif
   void set_device_id(const char *device_id) {
     this->device_id_ = device_id;
 #ifdef USE_COMMUNICATION_NET_INBOUND
@@ -182,6 +199,9 @@ class CommunicationNetProtocolComponent : public Component
 #endif
  protected:
   const char *device_id_{nullptr};
+#ifdef USE_COVER_MOTION_PUBLISHER
+  CoverMotionPublications *cover_motion_{nullptr};
+#endif
 #ifdef USE_COMMUNICATION_NET_MQTT_RESULT_OBSERVER
   TransactionTracker<4> transactions_{};
 #endif
@@ -205,6 +225,7 @@ class CommunicationNetProtocolComponent : public Component
     espnow_net_protocol::NetResult inbound_result_{};
     DeclarativeInboundBinding *active_binding_{nullptr};
     uint32_t inbound_started_ms_{0};
+    CoverCompletionProgress cover_progress_{};
     uint32_t inbound_timeout_ms_{0};
     bool inbound_expected_on_{false};
     bool inbound_active_{false};
