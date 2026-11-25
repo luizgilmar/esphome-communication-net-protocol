@@ -7,6 +7,16 @@ packages:
     vars:
       nspanel_peer_id: nspanel_gian_porta
   motion_events: !include quartogian_cover_motion.yaml
+  panel_relays: !include
+    file: ha_relay_associations.yaml
+    vars:
+      panel_1_binding: panel_1_toggle
+      panel_2_binding: panel_2_toggle
+      panel_1_state: panel_relay_1_state
+      panel_2_state: panel_relay_2_state
+      panel_1_entity: switch.painel_gian_porta_relay_1
+      panel_2_entity: switch.painel_gian_porta_relay_2
+      panel_toggle_action: switch.toggle
 communication_net_protocol:
   mqtt:
     sources:

@@ -1,0 +1,32 @@
+# Generic HA relay bridge: command and observed state use the same entity.
+# Required include vars: panel_1_binding, panel_2_binding, panel_1_state,
+# panel_2_state, panel_1_entity, panel_2_entity, panel_toggle_action.
+packages:
+  clear_previous_actions:
+    communication_net_protocol:
+      inbound:
+        bindings:
+          - id: !extend ${panel_1_binding}
+            then: !remove
+          - id: !extend ${panel_2_binding}
+            then: !remove
+communication_net_protocol:
+  inbound:
+    bindings:
+      - id: !extend ${panel_1_binding}
+        then:
+          - homeassistant.action:
+              action: ${panel_toggle_action}
+              data:
+                entity_id: ${panel_1_entity}
+      - id: !extend ${panel_2_binding}
+        then:
+          - homeassistant.action:
+              action: ${panel_toggle_action}
+              data:
+                entity_id: ${panel_2_entity}
+binary_sensor:
+  - id: !extend ${panel_1_state}
+    entity_id: ${panel_1_entity}
+  - id: !extend ${panel_2_state}
+    entity_id: ${panel_2_entity}

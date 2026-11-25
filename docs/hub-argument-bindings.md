@@ -317,3 +317,33 @@ Três testes Python do contrato/capacidade e cinco do overlay do HUB passaram.
 Fronteiras 45/64 aceitas e 0/65 recusadas; o teste nativo inclui preenchimento e
 recusa de overflow em 64. Este último passou somente em syntax-only com Clang,
 não foi executado como binário. Compilação binária do HUB no HA permanece pendente.
+
+
+## Compatibilidade dos relés após trocar o firmware do painel
+
+O Blackymas instalado expõe os relés usados pelo HUB como light; o NSPanel Easy
+candidato registra relay_1/relay_2 como switches (conferido no código gerado do
+binário compilado). O HUB não deve continuar atuando/observando as entidades
+light após a migração. Essa dependência não estava encerrada na preparação
+anterior e foi identificada antes de qualquer upload no painel.
+
+O pacote genérico ha_relay_associations.yaml associa binding, entidade de
+comando e entidade observada por parâmetros de include. O perfil Gian escolhe
+switch.painel_gian_porta_relay_1/2 e switch.toggle. Os recursos de protocolo
+light/painel_gian_porta_relay_1/2 são preservados para o TX; apenas a execução
+HA muda. Os IDs dos sensores/completion também são preservados.
+
+A composição remove primeiro as ações herdadas e depois coloca a ação nova.
+Isso é necessário porque listas then são concatenadas em !extend: apenas
+acrescentar switch.toggle deixaria também o light.toggle antigo. O teste exige
+exatamente uma ação por binding e a mesma entidade na observação correspondente.
+Não há novas lambdas, alteração de GPIO ou ações de retorno duplicadas.
+
+Seis testes no repositório TX passaram usando os passes reais de pacotes,
+substituições e resolução !extend/!remove. A expansão cobre o grafo real de
+comandos, observação e cover, excluindo includes de efeitos/hardware que só
+estão no HA. Total preservado: 45 comandos únicos, 2 execuções normais.
+Compilar essa atualização do HUB antes da transição; manter o binário preparado,
+sem instalar enquanto os relés ainda estiverem no firmware antigo. Coordenar
+com a instalação do NSPanel e conferir os IDs switch no HA após a troca.
+O firmware NSPanel e o TFT já compilados não mudam por essa correção YAML.
