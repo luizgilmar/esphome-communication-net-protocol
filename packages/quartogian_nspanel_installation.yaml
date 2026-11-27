@@ -1,6 +1,7 @@
 # Installation overlay for the existing Quartogian HUB; requires core 234bc9d or later.
 # Keep existing calibration, TX peer, legacy bindings, and all hardware includes.
 packages:
+  strip_group: !include quartogian_nspanel_strip_group.yaml
   direct_bindings: !include quartogian_nspanel_bindings.yaml
   direct_states: !include
     file: quartogian_nspanel_states.yaml

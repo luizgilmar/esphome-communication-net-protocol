@@ -1,0 +1,75 @@
+# Room associations only; generic validated argument actions execute one grouped transaction.
+# Legacy activate/deactivate/toggle/preset/effect routes remain the TX group routes.
+communication_net_protocol:
+  inbound:
+    bindings:
+    - id: nspanel_strips_rgb
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: rgb
+      arguments:
+        type: rgb
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - communication_net_protocol.apply_rgb:
+          id: FitaSuperior
+      - communication_net_protocol.apply_rgb:
+          id: FitaMeio
+      - communication_net_protocol.apply_rgb:
+          id: FitaMesa
+      completion:
+        light_id: FitaSuperior
+        additional_light_ids:
+        - FitaMeio
+        - FitaMesa
+        - SaidaLivre4
+        expected: 'on'
+        result_rgb: true
+        timeout: 3s
+        rgb_from_arguments: true
+        rgb_light_ids: &id001
+        - FitaSuperior
+        - FitaMeio
+        - FitaMesa
+    - id: nspanel_strips_brightness
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: brightness
+      arguments:
+        type: value
+        min: 1
+        max: 100
+      then:
+      - light.turn_on: SaidaLivre4
+      - delay: 300ms
+      - communication_net_protocol.apply_brightness:
+          id: FitaSuperior
+      - communication_net_protocol.apply_brightness:
+          id: FitaMeio
+      - communication_net_protocol.apply_brightness:
+          id: FitaMesa
+      completion:
+        light_id: FitaSuperior
+        additional_light_ids:
+        - FitaMeio
+        - FitaMesa
+        - SaidaLivre4
+        expected: 'on'
+        result_rgb: true
+        timeout: 3s
+        brightness_from_arguments: true
+        brightness_light_ids: *id001
+    - id: nspanel_strips_get
+      resource: light/fitas_superior_meio
+      execution_scope: light/alimentacao_fitas
+      command: get
+      then: []
+      completion:
+        light_id: FitaSuperior
+        additional_light_ids:
+        - FitaMeio
+        - FitaMesa
+        expected: observed
+        result_rgb: true
+        timeout: 3s
